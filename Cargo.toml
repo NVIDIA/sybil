@@ -1,0 +1,78 @@
+[package]
+name = "sybil"
+version = "1.0.0"
+authors = ["Jonathan Calmels <jcalmels@nvidia.com>"]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/NVIDIA/sybil"
+description = "Tools for Kerberos protocol transition and ticket impersonation"
+keywords = ["kerberos", "impersonation", "s4u"]
+categories = ["authentication"]
+exclude = [".*", "deny.toml", "rustfmt.toml", "Makefile"]
+
+[profile.release]
+lto = true
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 3
+
+[dependencies]
+argh = "0.1.12"
+close_fds = "0.3.2"
+config = { version = "0.13.3", features = ["toml"], default-features = false }
+futures = "0.3.29"
+lazy_static = "1.4.0"
+libc = "0.2.150"
+libgssapi = { git = "https://github.com/3XX0/libgssapi", branch = "s4u", features = ["s4u"] }
+netaddr2 = { version = "0.10.0", features = ["serde"] }
+nix = { version = "0.27.1", features = ["user", "fs"] }
+rand = "0.8.5"
+serde = { version = "1.0.192", features = ["derive"] }
+snafu = "0.7.5"
+tarpc = { version = "0.33.0", features = ["serde-transport", "serde-transport-bincode", "tcp"] }
+tokio = { version = "1.33.0", features = ["sync", "net", "rt-multi-thread", "process", "macros"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+trust-dns-resolver = "0.23.2"
+
+[build-dependencies]
+bindgen = "0.69.1"
+cc = "1.0.83"
+
+[package.metadata.deb]
+revision = "1"
+section = "admin"
+priority = "optional"
+extended-description = ""
+maintainer-scripts = "pkg/deb"
+systemd-units = { start = false, enable = false }
+depends = [
+    "libkrb5-3 (>= 1.19)",
+    "libkadm5srv-mit12 (>= 1.19)",
+    "libk5crypto3 (>= 1.19)",
+    "libkrb5support0 (>= 1.19)",
+    "libgssapi-krb5-2 (>= 1.19)",
+]
+assets = [
+  ["target/release/sybil", "/usr/sbin/sybil", "755"],
+  ["target/release/sybild", "/usr/sbin/sybild", "755"],
+  ["pkg/sybil.toml", "/etc/sybil.toml", "644"],
+  ["pkg/sybil.env", "/etc/default/sybil", "644"],
+]
+conf-files = [
+    "/etc/sybil.toml",
+    "/etc/default/sybil",
+]
+
+[package.metadata.generate-rpm]
+release = "1"
+requires = { krb5-libs = ">= 1.19", libkadm5 = ">= 1.19" }
+assets = [
+  {source = "pkg/rpm/sybil.service", dest = "/lib/systemd/system/sybil.service", mode = "644"},
+  {source = "target/release/sybil", dest = "/usr/sbin/sybil", mode = "755"},
+  {source = "target/release/sybild", dest = "/usr/sbin/sybild", mode = "755"},
+  {source = "pkg/sybil.toml", dest = "/etc/sybil.toml", mode = "644", config = true},
+  {source = "pkg/sybil.env", dest = "/etc/sysconfig/sybil", mode = "644", config = true},
+]

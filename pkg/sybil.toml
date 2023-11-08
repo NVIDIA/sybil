@@ -1,0 +1,18 @@
+# Specify the encryption type used when forging ticket credentials
+tkt_cipher = "aes256-sha1"
+# Specify the flags used when forging ticket credentials
+tkt_flags = "FRI"
+# Specify the lifetime used when forging ticket credentials
+tkt_life = "10h"
+# Specify the renewable lifetime used when forging ticket credentials
+tkt_renew_life = "7d"
+# Allow requests based on specific networks
+allow_networks = []
+# Allow requests based on specific principal realms
+allow_realms = []
+# Allow requests based on specific group memberships
+allow_groups = []
+# Strip the domain off principals when matching an allowed realm
+strip_domain = false
+# Generate a cross-realm TGT for the given realm instead of a regular TGT
+cross_realm = ""

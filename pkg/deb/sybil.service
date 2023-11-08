@@ -1,0 +1,13 @@
+[Unit]
+Description=Sybil Impersonation Daemon
+After=network.target
+Wants=krb5-kdc.service krb5-admin-server.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/sybil
+ExecStart=/usr/sbin/sybild $SYBILD_OPTIONS
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
