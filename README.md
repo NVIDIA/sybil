@@ -32,6 +32,8 @@ make deb rpm
 
 ## Setup
 
+#### IPA
+
 Assuming an existing [FreeIPA](https://www.freeipa.org/) or [RHEL IdM](https://access.redhat.com/products/identity-management/) install:
 
 ```sh
@@ -39,7 +41,7 @@ Assuming an existing [FreeIPA](https://www.freeipa.org/) or [RHEL IdM](https://a
 ipa service-add sybil/ipa.domain.lan
 ipa-getkeytab -p sybil/ipa.domain.lan -k /etc/krb5.keytab
 
-# Create the the Sybil DNS service record
+# Create the Sybil DNS service record
 ipa dnsrecord-add --srv-priority=0 --srv-weight=100 --srv-port=57811 --srv-target=ipa.domain.lan. domain.lan _sybil._tcp
 
 # Allow a host to perform impersonation against the Sybil service
@@ -49,6 +51,42 @@ ipa servicedelegationrule-add sybil
 ipa servicedelegationrule-add-member --principals host/server.domain.lan sybil
 ipa servicedelegationrule-add-target --servicedelegationtargets=sybil-target sybil
 ipa host-mod --ok-to-auth-as-delegate=true server.domain.lan
+
+# Configure and run Sybil
+cat > /etc/sybil.toml <<EOF
+tkt_cipher = "aes256-sha1"
+tkt_flags = "FRI"
+tkt_life = "10h"
+tkt_renew_life = "7d"
+allow_networks = ["192.168.0.0/24"]
+allow_realms = ["DOMAIN.LAN"]
+allow_groups = ["group@domain.lan"]
+strip_domain = true
+cross_realm = ""
+EOF
+
+systemctl enable --now sybil
+```
+#### MIT Kerberos
+
+Assuming an existing MIT Kerberos install with the [LDAP backend](https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_ldap.html) (required for S4U to work)
+
+```sh
+# Create the Sybil service principal and generate its keytab
+kadmin.local addprinc -randkey sybil/mit.domain.lan
+kadmin.local ktadd -k /etc/krb5.keytab sybil/mit.domain.lan
+
+# Create the Sybil DNS service record as follow in your DNS server
+# _sybil._tcp.domain.lan. 86400 IN SRV 0 100 57811 mit.domain.lan.
+
+# Allow a host to perform impersonation against the Sybil service
+ldapmodify -Y EXTERNAL -H ldapi:// <<EOF
+dn: krbPrincipalName=host/server.domain.lan@DOMAIN.LAN,cn=DOMAIN.LAN,cn=krbContainer,dc=domain,dc=lan
+changetype: modify
+add: krbAllowedToDelegateTo
+krbAllowedToDelegateTo: sybil/mit.domain.lan
+EOF
+kadmin.local modprinc +ok_to_auth_as_delegate host/server.domain.lan
 
 # Configure and run Sybil
 cat > /etc/sybil.toml <<EOF
