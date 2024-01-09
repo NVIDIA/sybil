@@ -89,7 +89,7 @@ pub fn new_client_ctx(clnt_princ: Option<&str>, serv_princ: &str) -> Result<Clie
     }
 
     Ok(ClientCtx::new(
-        cred,
+        Some(cred),
         serv_princ,
         CtxFlags::GSS_C_MUTUAL_FLAG,
         Some(MECH),

@@ -158,7 +158,6 @@ pub struct Client {
     gss: gss::ClientCtx,
 }
 
-#[tarpc::server]
 impl Sybil for SybilServer {
     async fn gss_init(self, _: Context, token: gss::Token) -> Result<Option<gss::Token>, SybilError> {
         tracing::debug!("performing GSS negotiation step");
@@ -358,7 +357,12 @@ pub async fn new_server(
                     }
                 }
             };
-            c.execute(srv.serve()).instrument(span).await;
+            c.execute(srv.serve())
+                .for_each(|r| {
+                    tokio::spawn(r.instrument(span.clone()))
+                        .unwrap_or_else(|error| tracing::error!(%error, "could not execute task to completion"))
+                })
+                .await;
         })
         .buffer_unordered(max_conn)
         .collect::<()>();
@@ -488,7 +492,6 @@ trait PrivSep {
 #[derive(Clone)]
 struct UserProcess;
 
-#[tarpc::server]
 impl PrivSep for UserProcess {
     async fn store_creds(self, _: context::Context, creds: krb::Credentials) -> Result<(), krb::Error> {
         tracing::debug!("acquiring credentials cache lock");
@@ -561,7 +564,12 @@ pub async fn serve_user_process() -> Result<(), Error> {
             ServeProcess
         })?;
 
-    BaseChannel::with_defaults(transport).execute(UserProcess.serve()).await;
+    BaseChannel::with_defaults(transport)
+        .execute(UserProcess.serve())
+        .for_each(|r| {
+            tokio::spawn(r).unwrap_or_else(|error| tracing::error!(%error, "could not execute task to completion"))
+        })
+        .await;
     tracing::debug!("stopping user process");
     Ok(())
 }
