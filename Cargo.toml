@@ -38,7 +38,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 trust-dns-resolver = "0.23.2"
 
 [build-dependencies]
-bindgen = "0.69.1"
+bindgen = "0.69.2"
 cc = "1.0.83"
 
 [package.metadata.deb]
