@@ -15,8 +15,8 @@ extern int k5_buf_status(struct k5buf *);
 extern void k5_marshal_cred(struct k5buf *, int, krb5_creds *);
 extern krb5_error_code k5_unmarshal_cred(const char *, size_t, int, krb5_creds *);
 
-krb5_error_code krbutil_init_context(krb5_context *);
-void krbutil_free_context(krb5_context);
+krb5_error_code krbutil_init(void);
+void krbutil_fini(void);
 krb5_context krbutil_context(void);
 krb5_error_code krbutil_forge_creds(krb5_context, krb5_data *, const char *, const char *, const char *,
                                     const char *, const char *, const char *, const char *)

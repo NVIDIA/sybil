@@ -46,11 +46,8 @@ fn main() {
         .define("KADMIN_PRINCIPAL", SYBIL_ADMIN_PRINCIPAL)
         .compile("krbutil");
 
-    for (bin, sym) in [
-        ("sybil", "krbutil_init_context_krb5"),
-        ("sybild", "krbutil_init_context_kadm5"),
-    ] {
-        println!("cargo:rustc-link-arg-bin={bin}=-Wl,--defsym=krbutil_init_context={sym}");
+    for (bin, sym) in [("sybil", "krbutil_init_krb5"), ("sybild", "krbutil_init_kadm5")] {
+        println!("cargo:rustc-link-arg-bin={bin}=-Wl,--defsym=krbutil_init={sym}");
     }
     for lib in ["krb5", "kadm5srv", "k5crypto", "krb5support"] {
         println!("cargo:rustc-link-lib={lib}");

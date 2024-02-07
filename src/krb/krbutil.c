@@ -19,35 +19,56 @@
 #define goto_out(ret, ...) if (ret) goto out##__VA_OPT__(_)##__VA_ARGS__
 
 static krb5_context context = NULL;
+static void *kadmin = NULL;
 
 __attribute__((constructor))
 static void krbutil_ctor(void)
 {
-        if (krbutil_init_context(&context)) {
-                fprintf(stderr, "could not initialize krb5 context\n");
-                abort();
+        krb5_error_code ret;
+
+        if ((ret = krbutil_init())) {
+                const char *errmsg = krb5_get_error_message(context, ret);
+                fprintf(stderr, "%s\n", context ? errmsg : "Could not initialize krb5 context");
+                krb5_free_error_message(context, errmsg);
+                exit(1);
         }
 }
 
 __attribute__((destructor))
 static void krbutil_dtor(void)
 {
-        krbutil_free_context(context);
+        krbutil_fini();
 }
 
-krb5_error_code krbutil_init_context_krb5(krb5_context *ctx)
+krb5_error_code krbutil_init_krb5(void)
 {
-        return (krb5_init_context(ctx));
+        return (krb5_init_context(&context));
 }
 
-krb5_error_code krbutil_init_context_kadm5(krb5_context *ctx)
+krb5_error_code krbutil_init_kadm5(void)
 {
-        return (kadm5_init_krb5_context(ctx));
+        kadm5_ret_t ret;
+        char *realm;
+
+        ret = kadm5_init_krb5_context(&context);
+        goto_out(ret);
+        ret = krb5_get_default_realm(context, &realm);
+        goto_out(ret);
+        ret = kadm5_init(context, string(KADMIN_PRINCIPAL), NULL, NULL,
+                         &(kadm5_config_params){.mask = KADM5_CONFIG_REALM, .realm = realm},
+                         KADM5_STRUCT_VERSION, KADM5_API_VERSION_4, NULL, &kadmin);
+
+        krb5_free_default_realm(context, realm);
+out:
+        return (krb5_error_code)(ret);
 }
 
-void krbutil_free_context(krb5_context ctx)
+void krbutil_fini(void)
 {
-        krb5_free_context(ctx);
+        if (context != NULL)
+                krb5_free_context(context);
+        if (kadmin != NULL)
+                kadm5_destroy(kadmin);
 }
 
 krb5_context krbutil_context(void)
@@ -139,18 +160,8 @@ static krb5_error_code encrypt_ticket(krb5_context ctx,
                                       krb5_ticket *tkt)
 {
         kadm5_ret_t ret;
-        char *realm;
-        void *kadmin;
         kadm5_key_data *keys;
         int i, nkeys;
-
-        ret = krb5_get_default_realm(ctx, &realm);
-        goto_out(ret, realm);
-
-        ret = kadm5_init(ctx, string(KADMIN_PRINCIPAL), NULL, NULL,
-                         &(kadm5_config_params){.mask = KADM5_CONFIG_REALM, .realm = realm},
-                         KADM5_STRUCT_VERSION, KADM5_API_VERSION_4, NULL, &kadmin);
-        goto_out(ret, kadmin);
 
         ret = kadm5_get_principal_keys(kadmin, serv, 0, &keys, &nkeys);
         goto_out(ret, keys);
@@ -167,10 +178,6 @@ static krb5_error_code encrypt_ticket(krb5_context ctx,
                 explicit_bzero(keys[i].key.contents, keys[i].key.length);
         kadm5_free_kadm5_key_data(ctx, nkeys, keys);
 out_keys:
-        kadm5_destroy(kadmin);
-out_kadmin:
-        krb5_free_default_realm(ctx, realm);
-out_realm:
         return (krb5_error_code)(ret);
 }
 
