@@ -200,6 +200,14 @@ impl Sybil for SybilServer {
             format!("{}/{realm}@{}", krb::TGS_NAME, SETTINGS.cross_realm)
         };
 
+        if krb::local_user(user).map_err(|error| {
+            tracing::error!(%error, princ = format!("{user}@{realm}"), "could not retrieve local user for principal");
+            SybilError::KerberosCreds
+        })?.eq(user) {
+            tracing::error!(user, realm, "translation mismatch for user principal in realm");
+            return Err(SybilError::KerberosCreds);
+        }
+
         tracing::debug!(user, "forging kerberos credentials");
         let creds = krb::forge_credentials(
             user,

@@ -297,7 +297,24 @@ out:
         return (ret);
 }
 
-krb5_error_code krbutil_local_user(krb5_context ctx, char *user, size_t size, const krb5_data *cred_data)
+krb5_error_code krbutil_local_user(krb5_context ctx, char *user, size_t size, const char *user_princ)
+{
+        krb5_error_code ret;
+        krb5_principal princ;
+
+        if (*user_princ == '\0')
+                return (KRB5_PARSE_MALFORMED);
+
+        ret = krb5_parse_name_flags(ctx, user_princ, KRB5_PRINCIPAL_PARSE_ENTERPRISE, &princ);
+        goto_out(ret, princ);
+        ret = krb5_aname_to_localname(ctx, princ, size, user);
+
+        krb5_free_principal(ctx, princ);
+out_princ:
+        return (ret);
+}
+
+krb5_error_code krbutil_local_user_creds(krb5_context ctx, char *user, size_t size, const krb5_data *cred_data)
 {
         krb5_error_code ret;
         krb5_creds creds;

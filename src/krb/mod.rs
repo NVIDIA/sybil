@@ -212,6 +212,25 @@ pub fn default_realm() -> Result<String, Error> {
     }
 }
 
+pub fn local_user(princ: &str) -> Result<String, Error> {
+    let size = match unistd::sysconf(SysconfVar::LOGIN_NAME_MAX) {
+        Ok(Some(n)) => n as usize,
+        Ok(None) | Err(_) => 256,
+    };
+    let mut user = Vec::<u8>::with_capacity(size);
+    let princ = CString::new(princ)?;
+
+    let ctx = CONTEXT.lock().unwrap();
+
+    let ret = unsafe { cffi::krbutil_local_user(ctx.0, user.as_mut_ptr() as *mut raw::c_char, size, princ.as_ptr()) };
+    if ret == 0 {
+        unsafe { user.set_len(size) };
+        Ok(CStr::from_bytes_until_nul(&user)?.to_owned().into_string()?)
+    } else {
+        Err(ret.into())
+    }
+}
+
 pub fn forge_credentials(
     clnt_princ: &str,
     serv_princ: &str,
@@ -262,7 +281,8 @@ impl Credentials {
 
         let ctx = CONTEXT.lock().unwrap();
 
-        let ret = unsafe { cffi::krbutil_local_user(ctx.0, user.as_mut_ptr() as *mut raw::c_char, size, &self.0) };
+        let ret =
+            unsafe { cffi::krbutil_local_user_creds(ctx.0, user.as_mut_ptr() as *mut raw::c_char, size, &self.0) };
         if ret == 0 {
             unsafe { user.set_len(size) };
             Ok(CStr::from_bytes_until_nul(&user)?.to_owned().into_string()?)
