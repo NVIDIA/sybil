@@ -6,7 +6,7 @@
 mod dns;
 mod gss;
 mod krb;
-use gss::SecurityContext;
+use gss::{SecurityContext, SecurityContextExt};
 
 use futures::{join, prelude::*};
 use netaddr2::{Contains, NetAddr};
@@ -23,7 +23,7 @@ use std::{
     fmt::Display,
     fs, io,
     net::IpAddr,
-    ops::Deref,
+    ops::{Deref, DerefMut},
     os::{
         fd::AsRawFd,
         fd::FromRawFd,
@@ -200,7 +200,7 @@ impl Sybil for SybilServer {
             format!("{}/{realm}@{}", krb::TGS_NAME, SETTINGS.cross_realm)
         };
 
-        if krb::local_user(user).map_err(|error| {
+        if !krb::local_user(user).map_err(|error| {
             tracing::error!(%error, princ = format!("{user}@{realm}"), "could not retrieve local user for principal");
             SybilError::KerberosCreds
         })?.eq(user) {
@@ -255,7 +255,7 @@ impl SybilServer {
             return Err(SybilError::AuthRequired);
         }
 
-        let princ = gss::source_principal(&mut *gss).map_err(|error| {
+        let princ = gss.deref_mut().source_principal().map_err(|error| {
             tracing::error!(%error, "could not retrieve source principal");
             SybilError::Unauthorized
         })?;
@@ -268,7 +268,7 @@ impl SybilServer {
                 SybilError::Unauthorized
             })?;
 
-        let user = gss::source_username(&mut *gss).map_err(|error| {
+        let user = gss.deref_mut().source_username().map_err(|error| {
             tracing::error!(%error, "could not retrieve source username");
             SybilError::Unauthorized
         })?;

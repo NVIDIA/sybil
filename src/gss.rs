@@ -96,12 +96,19 @@ pub fn new_client_ctx(clnt_princ: Option<&str>, serv_princ: &str) -> Result<Clie
     ))
 }
 
-pub fn source_principal(ctx: &mut impl SecurityContext) -> Result<String, Error> {
-    let princ = ctx.source_name().and_then(|n| n.display_name())?;
-    String::from_utf8(princ.to_vec()).context(DecodePrincipal)
+pub trait SecurityContextExt {
+    fn source_principal(&mut self) -> Result<String, Error>;
+    fn source_username(&mut self) -> Result<String, Error>;
 }
 
-pub fn source_username(ctx: &mut impl SecurityContext) -> Result<String, Error> {
-    let princ = ctx.source_name().and_then(|n| n.local_name(Some(MECH)))?;
-    String::from_utf8(princ.to_vec()).context(DecodePrincipal)
+impl<T: SecurityContext> SecurityContextExt for T {
+    fn source_principal(&mut self) -> Result<String, Error> {
+        let princ = self.source_name().and_then(|n| n.display_name())?;
+        String::from_utf8(princ.to_vec()).context(DecodePrincipal)
+    }
+
+    fn source_username(&mut self) -> Result<String, Error> {
+        let princ = self.source_name().and_then(|n| n.local_name(Some(MECH)))?;
+        String::from_utf8(princ.to_vec()).context(DecodePrincipal)
+    }
 }
