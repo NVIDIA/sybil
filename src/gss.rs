@@ -65,9 +65,18 @@ pub fn new_server_ctx(serv_princ: &str) -> Result<ServerCtx, Error> {
     Ok(ServerCtx::new(cred))
 }
 
-pub fn new_client_ctx(clnt_princ: Option<&str>, serv_princ: &str) -> Result<ClientCtx, Error> {
+pub fn new_client_ctx(clnt_princ: Option<&str>, serv_princ: &str, delegate: bool) -> Result<ClientCtx, Error> {
     let mut mechs = OidSet::new().unwrap();
     mechs.add(MECH).unwrap();
+
+    let flags = if delegate {
+        CtxFlags::GSS_C_MUTUAL_FLAG | CtxFlags::GSS_C_CONF_FLAG | CtxFlags::GSS_C_INTEG_FLAG
+    } else {
+        CtxFlags::GSS_C_MUTUAL_FLAG
+            | CtxFlags::GSS_C_CONF_FLAG
+            | CtxFlags::GSS_C_INTEG_FLAG
+            | CtxFlags::GSS_C_DELEG_POLICY_FLAG
+    };
 
     let serv_princ = Name::new(serv_princ.as_bytes(), Some(&GSS_NT_HOSTBASED_SERVICE))
         .and_then(|s| s.canonicalize(Some(MECH)))
@@ -88,12 +97,7 @@ pub fn new_client_ctx(clnt_princ: Option<&str>, serv_princ: &str) -> Result<Clie
             })?;
     }
 
-    Ok(ClientCtx::new(
-        Some(cred),
-        serv_princ,
-        CtxFlags::GSS_C_MUTUAL_FLAG,
-        Some(MECH),
-    ))
+    Ok(ClientCtx::new(Some(cred), serv_princ, flags, Some(MECH)))
 }
 
 pub trait SecurityContextExt {

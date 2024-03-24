@@ -328,7 +328,7 @@ pub async fn new_client(addrs: Option<impl ToSocketAddrs + Display>, princ: Opti
 
     let host = dns::lookup_address(&transport.peer_addr()?.ip()).await?;
     let rpc = SybilClient::new(Default::default(), transport).spawn();
-    let gss = gss::new_client_ctx(princ, &format!("{SYBIL_SERVICE}@{host}"))?;
+    let gss = gss::new_client_ctx(princ, &format!("{SYBIL_SERVICE}@{host}"), false)?;
 
     Ok(Client { rpc, gss })
 }
