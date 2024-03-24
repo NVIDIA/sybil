@@ -3,13 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+mod conf;
 mod dns;
 mod gss;
 mod krb;
+use conf::CONFIG;
 use gss::{SecurityContext, SecurityContextExt};
 
 use futures::{join, prelude::*};
-use netaddr2::{Contains, NetAddr};
+use netaddr2::Contains;
 use nix::{
     errno::Errno,
     fcntl::{self, FlockArg},
@@ -29,7 +31,6 @@ use std::{
         fd::FromRawFd,
         unix::{net::UnixStream as StdUnixStream, process::ExitStatusExt},
     },
-    path::Path,
     process::Stdio,
     sync::Arc,
 };
@@ -52,29 +53,6 @@ pub const ENV_PRIVSEP_USER: &str = "SYBIL_PRIVSEP_USER";
 const SYBIL_PORT: u16 = 57811;
 const SYBIL_SERVICE: &str = "sybil";
 const SYBIL_SRV_RECORD: &str = "_sybil._tcp";
-const DEFAULT_TKT_CIPHER: &str = "aes256-sha1";
-const DEFAULT_TKT_FLAGS: &str = "FRI";
-const DEFAULT_TKT_LIFE: &str = "10h";
-const DEFAULT_TKT_RENEW_LIFE: &str = "7d";
-
-lazy_static::lazy_static! {
-    static ref SETTINGS: Settings = config::Config::builder()
-        .add_source(
-            config::File::with_name(
-                &option_env!("PREFIX").map_or("/".as_ref(), Path::new).join("etc/sybil").to_string_lossy(),
-            )
-            .required(false),
-        )
-        .add_source(
-            config::Environment::with_prefix("SYBIL").try_parsing(true).list_separator(","),
-        )
-        .build()
-        .and_then(config::Config::try_deserialize)
-        .unwrap_or_else(|error| {
-            tracing::warn!(%error, "could not load configuration");
-            Settings::default()
-        });
-}
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -92,35 +70,6 @@ pub enum Error {
     SybilServer { source: SybilError },
     #[snafu(display("Privilege separation error"), context(false))]
     PrivSep { source: PrivSepError },
-}
-
-#[derive(Deserialize)]
-struct Settings {
-    tkt_cipher: String,
-    tkt_flags: String,
-    tkt_life: String,
-    tkt_renew_life: String,
-    allow_networks: Vec<NetAddr>,
-    allow_realms: Vec<String>,
-    allow_groups: Vec<String>,
-    strip_domain: bool,
-    cross_realm: String,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            tkt_cipher: DEFAULT_TKT_CIPHER.to_owned(),
-            tkt_flags: DEFAULT_TKT_FLAGS.to_owned(),
-            tkt_life: DEFAULT_TKT_LIFE.to_owned(),
-            tkt_renew_life: DEFAULT_TKT_RENEW_LIFE.to_owned(),
-            allow_networks: Default::default(),
-            allow_realms: Default::default(),
-            allow_groups: Default::default(),
-            strip_domain: Default::default(),
-            cross_realm: Default::default(),
-        }
-    }
 }
 
 #[derive(Debug, Snafu, Serialize, Deserialize)]
@@ -178,10 +127,10 @@ impl Sybil for SybilServer {
     async fn get_tgt(self, _: Context) -> Result<gss::Token, SybilError> {
         let user = self.authorize().await?;
 
-        let user = SETTINGS
+        let user = CONFIG
             .strip_domain
             .then(|| {
-                SETTINGS
+                CONFIG
                     .allow_realms
                     .iter()
                     .map(|r| r.to_lowercase())
@@ -194,10 +143,10 @@ impl Sybil for SybilServer {
             tracing::error!(%error, "could not retrieve default realm");
             SybilError::KerberosCreds
         })?;
-        let princ = if SETTINGS.cross_realm.trim().is_empty() {
+        let princ = if CONFIG.cross_realm.trim().is_empty() {
             format!("{}/{realm}", krb::TGS_NAME)
         } else {
-            format!("{}/{realm}@{}", krb::TGS_NAME, SETTINGS.cross_realm)
+            format!("{}/{realm}@{}", krb::TGS_NAME, CONFIG.cross_realm)
         };
 
         if !krb::local_user(user).map_err(|error| {
@@ -212,11 +161,11 @@ impl Sybil for SybilServer {
         let creds = krb::forge_credentials(
             user,
             &princ,
-            &SETTINGS.tkt_cipher,
-            &SETTINGS.tkt_flags,
+            &CONFIG.tkt_cipher,
+            &CONFIG.tkt_flags,
             None,
-            Some(&SETTINGS.tkt_life),
-            Some(&SETTINGS.tkt_renew_life),
+            Some(&CONFIG.tkt_life),
+            Some(&CONFIG.tkt_renew_life),
         )
         .map_err(|error| {
             tracing::error!(%error, user, "could not forge credentials");
@@ -240,7 +189,7 @@ impl SybilServer {
     async fn authorize(&self) -> Result<String, SybilError> {
         tracing::debug!("performing authorization checks");
 
-        SETTINGS
+        CONFIG
             .allow_networks
             .iter()
             .find(|n| n.contains(&self.client))
@@ -259,7 +208,7 @@ impl SybilServer {
             tracing::error!(%error, "could not retrieve source principal");
             SybilError::Unauthorized
         })?;
-        SETTINGS
+        CONFIG
             .allow_realms
             .iter()
             .find(|r| princ.ends_with(&format!("@{r}")))
@@ -290,14 +239,10 @@ impl SybilServer {
             .into_iter()
             .filter_map(|i| unistd::Group::from_gid(i).ok().flatten().map(|g| g.name))
             .collect();
-        SETTINGS
-            .allow_groups
-            .iter()
-            .find(|g| groups.contains(g))
-            .ok_or_else(|| {
-                tracing::warn!(user, ?groups, "request refused due to group policy");
-                SybilError::Unauthorized
-            })?;
+        CONFIG.allow_groups.iter().find(|g| groups.contains(g)).ok_or_else(|| {
+            tracing::warn!(user, ?groups, "request refused due to group policy");
+            SybilError::Unauthorized
+        })?;
 
         Ok(user)
     }
@@ -307,18 +252,8 @@ pub async fn new_server(
     addrs: Option<impl ToSocketAddrs + Display>,
     max_conn: usize,
 ) -> Result<Server<impl Future>, Error> {
-    tracing::info!(
-        config.tkt_cipher = ?SETTINGS.tkt_cipher,
-        config.tkt_flags = ?SETTINGS.tkt_flags,
-        config.tkt_life = ?SETTINGS.tkt_life,
-        config.tkt_renew_life = ?SETTINGS.tkt_renew_life,
-        config.allow_networks = ?SETTINGS.allow_networks.iter().map(ToString::to_string).collect::<Vec<_>>(),
-        config.allow_realms = ?SETTINGS.allow_realms,
-        config.allow_groups = ?SETTINGS.allow_groups,
-        config.strip_domain = ?SETTINGS.strip_domain,
-        config.cross_realm = ?SETTINGS.cross_realm,
-        "loaded configuration"
-    );
+    conf::load_config();
+
     let transport = match addrs {
         Some(addrs) => {
             tracing::info!(%addrs, "starting sybil server");
