@@ -398,18 +398,13 @@ impl PrivSep for UserProcess {
             tracing::error!(%error, path = %path.display(), "could not create lock file");
             krb::ErrorKind::CredCacheIO
         })?;
-        fcntl::flock(lock.as_raw_fd(), FlockArg::LockExclusive).map_err(|error| {
+        let _lock = fcntl::Flock::lock(lock, FlockArg::LockExclusive).map_err(|(_, error)| {
             tracing::error!(%error, path = %path.display(), "could not acquire lock file");
             krb::ErrorKind::CredCacheIO
         })?;
 
         tracing::debug!("storing kerberos credentials");
-        let res = creds.store();
-
-        fcntl::flock(lock.as_raw_fd(), FlockArg::Unlock)
-            .map_err(|error| tracing::warn!(%error, path = %path.display(), "could not release lock file"))
-            .ok();
-        res
+        creds.store()
     }
 }
 

@@ -22,27 +22,27 @@ opt-level = 3
 argh = "0.1.12"
 bitflags = "2.5.0"
 close_fds = "0.3.2"
-config = { version = "0.13.4", features = ["toml"], default-features = false }
+config = { version = "0.14.0", features = ["toml"], default-features = false }
 futures = "0.3.30"
 lazy_static = "1.4.0"
-libc = "0.2.152"
+libc = "0.2.153"
 libgssapi = { version = "0.7.0", features = ["s4u"] }
 netaddr2 = { version = "0.10.0", features = ["serde"] }
-nix = { version = "0.27.1", features = ["user", "fs"] }
+nix = { version = "0.28.0", features = ["user", "fs"] }
 rand = "0.8.5"
 regex-lite = "0.1.5"
-serde = { version = "1.0.195", features = ["derive"] }
+serde = { version = "1.0.197", features = ["derive"] }
 serde_with = "3.7.0"
-snafu = "0.8.0"
+snafu = "0.8.2"
 tarpc = { version = "0.34.0", features = ["serde-transport", "serde-transport-bincode", "tcp"] }
-tokio = { version = "1.35.1", features = ["sync", "net", "rt-multi-thread", "process", "macros"] }
+tokio = { version = "1.36.0", features = ["sync", "net", "rt-multi-thread", "process", "macros"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 trust-dns-resolver = "0.23.2"
 
 [build-dependencies]
-bindgen = "0.69.2"
-cc = "1.0.83"
+bindgen = "0.69.4"
+cc = "1.0.90"
 
 [package.metadata.deb]
 revision = "1"
