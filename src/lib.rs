@@ -3,15 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+mod auth;
 mod conf;
 mod dns;
 mod gss;
 mod krb;
-use conf::CONFIG;
-use gss::{SecurityContext, SecurityContextExt};
+mod trace;
+
+use crate::conf::CONFIG;
+use crate::gss::SecurityContext;
 
 use futures::{join, prelude::*};
-use netaddr2::Contains;
 use nix::{
     errno::Errno,
     fcntl::{self, FlockArg},
@@ -21,7 +23,6 @@ use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 use std::{
     env,
-    ffi::CString,
     fmt::Display,
     fs, io,
     net::IpAddr,
@@ -94,7 +95,7 @@ trait Sybil {
 
 #[derive(Clone)]
 struct SybilServer {
-    client: IpAddr,
+    peer: IpAddr,
     gss: Arc<Mutex<gss::ServerCtx>>,
 }
 
@@ -125,47 +126,48 @@ impl Sybil for SybilServer {
     }
 
     async fn get_tgt(self, _: Context) -> Result<gss::Token, SybilError> {
-        let user = self.authorize().await?;
+        let id = &self.authorize(auth::Permissions::KINIT).await?;
 
-        let user = CONFIG
-            .strip_domain
-            .then(|| {
-                CONFIG
-                    .allow_realms
-                    .iter()
-                    .map(|r| r.to_lowercase())
-                    .find_map(|r| user.strip_suffix(&format!("@{r}")))
-            })
-            .flatten()
-            .unwrap_or(&user);
-
+        let user = id.user.as_ref().map_or_else(
+            || {
+                tracing::warn!("request refused due to missing user");
+                Err(SybilError::Unauthorized)
+            },
+            |u| Ok(&u.name),
+        )?;
         let realm = krb::default_realm().map_err(|error| {
             tracing::error!(%error, "could not retrieve default realm");
             SybilError::KerberosCreds
         })?;
-        let princ = if CONFIG.cross_realm.trim().is_empty() {
-            format!("{}/{realm}", krb::TGS_NAME)
-        } else {
-            format!("{}/{realm}@{}", krb::TGS_NAME, CONFIG.cross_realm)
-        };
 
-        if !krb::local_user(user).map_err(|error| {
-            tracing::error!(%error, princ = format!("{user}@{realm}"), "could not retrieve local user for principal");
+        let target_user = krb::local_user(user).map_err(|error| {
+            tracing::error!(%error, principal = %format!("{user}@{realm}"), "could not retrieve local user for principal");
             SybilError::KerberosCreds
-        })?.eq(user) {
-            tracing::error!(user, realm, "translation mismatch for user principal in realm");
+        })?;
+        if user != &target_user {
+            tracing::error!(%user, %realm, "translation mismatch for user principal in realm");
             return Err(SybilError::KerberosCreds);
         }
 
-        tracing::debug!(user, "forging kerberos credentials");
+        let princ = if CONFIG.ticket.cross_realm.as_ref().is_some_and(|r| !r.trim().is_empty()) {
+            format!(
+                "{}/{realm}@{}",
+                krb::TGS_NAME,
+                CONFIG.ticket.cross_realm.as_ref().unwrap()
+            )
+        } else {
+            format!("{}/{realm}", krb::TGS_NAME)
+        };
+
+        tracing::debug!(%user, "forging kerberos credentials");
         let creds = krb::forge_credentials(
             user,
             &princ,
-            &CONFIG.tkt_cipher,
-            &CONFIG.tkt_flags,
+            &CONFIG.ticket.cipher,
+            &CONFIG.ticket.flags,
             None,
-            Some(&CONFIG.tkt_life),
-            Some(&CONFIG.tkt_renew_life),
+            Some(&CONFIG.ticket.lifetime),
+            Some(&CONFIG.ticket.renew_lifetime),
         )
         .map_err(|error| {
             tracing::error!(%error, user, "could not forge credentials");
@@ -186,65 +188,13 @@ impl Sybil for SybilServer {
 }
 
 impl SybilServer {
-    async fn authorize(&self) -> Result<String, SybilError> {
-        tracing::debug!("performing authorization checks");
-
-        CONFIG
-            .allow_networks
-            .iter()
-            .find(|n| n.contains(&self.client))
-            .ok_or_else(|| {
-                tracing::warn!(client = %self.client, "request refused due to network policy");
-                SybilError::Unauthorized
-            })?;
-
+    async fn authorize(&self, perms: auth::Permissions) -> Result<auth::Identity, SybilError> {
         let mut gss = self.gss.lock().await;
         if !gss.is_complete() || !gss.open().unwrap_or(false) {
             tracing::warn!("request refused due to missing authentication");
             return Err(SybilError::AuthRequired);
         }
-
-        let princ = gss.deref_mut().source_principal().map_err(|error| {
-            tracing::error!(%error, "could not retrieve source principal");
-            SybilError::Unauthorized
-        })?;
-        CONFIG
-            .allow_realms
-            .iter()
-            .find(|r| princ.ends_with(&format!("@{r}")))
-            .ok_or_else(|| {
-                tracing::warn!(%princ, "request refused due to realm policy");
-                SybilError::Unauthorized
-            })?;
-
-        let user = gss.deref_mut().source_username().map_err(|error| {
-            tracing::error!(%error, "could not retrieve source username");
-            SybilError::Unauthorized
-        })?;
-        let groups: Vec<_> = unistd::User::from_name(&user)
-            .map_err(|error| {
-                tracing::error!(%error, user, "could not lookup user");
-                SybilError::Unauthorized
-            })?
-            .ok_or_else(|| {
-                tracing::warn!(user, "request refused due to user not found");
-                SybilError::Unauthorized
-            })
-            .and_then(|u| {
-                unistd::getgrouplist(&CString::new(u.name).unwrap(), u.gid).map_err(|error| {
-                    tracing::error!(%error, user, "could not lookup groups");
-                    SybilError::Unauthorized
-                })
-            })?
-            .into_iter()
-            .filter_map(|i| unistd::Group::from_gid(i).ok().flatten().map(|g| g.name))
-            .collect();
-        CONFIG.allow_groups.iter().find(|g| groups.contains(g)).ok_or_else(|| {
-            tracing::warn!(user, ?groups, "request refused due to group policy");
-            SybilError::Unauthorized
-        })?;
-
-        Ok(user)
+        auth::authorize(gss.deref_mut(), &self.peer, perms).ok_or(SybilError::Unauthorized)
     }
 }
 
@@ -278,20 +228,20 @@ pub async fn new_server(
         })
         .map(BaseChannel::with_defaults)
         .map(|c| async {
-            let client = match c.transport().peer_addr() {
+            let peer = match c.transport().peer_addr() {
                 Ok(addr) => addr.ip(),
                 Err(error) => {
-                    tracing::error!(%error, "could not retrieve client address");
+                    tracing::error!(%error, "could not retrieve peer address");
                     return;
                 }
             };
 
-            let span = tracing::info_span!("sybil_service", %client);
+            let span = tracing::info_span!("sybil_service", %peer);
             let srv = {
                 let _enter = span.enter();
                 match gss::new_server_ctx(SYBIL_SERVICE) {
                     Ok(gss) => SybilServer {
-                        client,
+                        peer,
                         gss: Arc::new(Mutex::new(gss)),
                     },
                     Err(error) => {

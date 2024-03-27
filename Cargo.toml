@@ -20,6 +20,7 @@ opt-level = 3
 
 [dependencies]
 argh = "0.1.12"
+bitflags = "2.5.0"
 close_fds = "0.3.2"
 config = { version = "0.13.4", features = ["toml"], default-features = false }
 futures = "0.3.30"
@@ -29,7 +30,9 @@ libgssapi = { version = "0.7.0", features = ["s4u"] }
 netaddr2 = { version = "0.10.0", features = ["serde"] }
 nix = { version = "0.27.1", features = ["user", "fs"] }
 rand = "0.8.5"
+regex-lite = "0.1.5"
 serde = { version = "1.0.195", features = ["derive"] }
+serde_with = "3.7.0"
 snafu = "0.8.0"
 tarpc = { version = "0.34.0", features = ["serde-transport", "serde-transport-bincode", "tcp"] }
 tokio = { version = "1.35.1", features = ["sync", "net", "rt-multi-thread", "process", "macros"] }
