@@ -8,48 +8,32 @@ mod conf;
 mod dns;
 mod gss;
 mod krb;
+mod privsep;
 mod trace;
 
 use crate::conf::CONFIG;
 use crate::gss::SecurityContext;
+pub use crate::privsep::PRIVSEP;
 
 use futures::{join, prelude::*};
-use nix::{
-    errno::Errno,
-    fcntl::{self, FlockArg},
-    unistd,
-};
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 use std::{
-    env,
     fmt::Display,
-    fs, io,
+    io,
     net::IpAddr,
     ops::{Deref, DerefMut},
-    os::{
-        fd::AsRawFd,
-        fd::FromRawFd,
-        unix::{net::UnixStream as StdUnixStream, process::ExitStatusExt},
-    },
-    process::Stdio,
     sync::Arc,
 };
 use tarpc::{
     client::RpcError,
     context::{self, Context},
-    serde_transport::{tcp, Transport},
+    serde_transport::tcp,
     server::{BaseChannel, Channel},
     tokio_serde::formats::Bincode,
 };
-use tokio::{
-    net::{ToSocketAddrs, UnixStream},
-    process::{Child, Command},
-    sync::Mutex,
-};
+use tokio::{net::ToSocketAddrs, sync::Mutex};
 use tracing::Instrument;
-
-pub const ENV_PRIVSEP_USER: &str = "SYBIL_PRIVSEP_USER";
 
 const SYBIL_PORT: u16 = 57811;
 const SYBIL_SERVICE: &str = "sybil";
@@ -70,7 +54,7 @@ pub enum Error {
     #[snafu(display("Sybil server error"), context(false))]
     SybilServer { source: SybilError },
     #[snafu(display("Privilege separation error"), context(false))]
-    PrivSep { source: PrivSepError },
+    PrivSep { source: privsep::Error },
 }
 
 #[derive(Debug, Snafu, Serialize, Deserialize)]
@@ -335,129 +319,18 @@ impl Client {
         let user = creds.local_user()?;
 
         tracing::info!("storing kerberos credentials");
-        let (ipc, mut proc) = spawn_user_process(&user)?;
+        let (ipc, mut proc) = privsep::spawn_user_process(&user)?;
         let req = async {
             let res = ipc.store_creds(context::current(), creds).await;
             drop(ipc);
             res
         };
-        let (req, proc) = join!(req, proc.wait());
+        let (resp, _) = join!(req, proc.wait());
 
-        match proc {
-            Err(error) => tracing::warn!(%error, "could not wait on user process"),
-            Ok(status) if !status.success() && status.code().is_some() => tracing::warn!(
-                status = status.code().unwrap(),
-                "user process terminated with non-zero status"
-            ),
-            Ok(status) if !status.success() && status.code().is_none() => tracing::warn!(
-                signal = status.signal().unwrap(),
-                "user process terminated with a signal"
-            ),
-            _ => (),
-        };
-        Ok(req.context(IpcRequest)??)
+        Ok(resp.context(privsep::IpcRequest)??)
     }
 }
 
-#[derive(Debug, Snafu)]
-#[snafu(context(suffix(false)))]
-pub enum PrivSepError {
-    #[snafu(display("Failed to lookup user"))]
-    LookupUser {
-        #[snafu(source(from(Errno, Into::into)))]
-        source: io::Error,
-    },
-    #[snafu(display("Failed to find user `{user}`"))]
-    UserNotFound { user: String },
-    #[snafu(display("Failed to issue IPC request"))]
-    IpcRequest { source: RpcError },
-    #[snafu(display("Failed to spawn user process"), context(false))]
-    SpawnProcess { source: io::Error },
-    #[snafu(display("Failed to serve user process"))]
-    ServeProcess { source: io::Error },
-}
-
-#[tarpc::service]
-trait PrivSep {
-    async fn store_creds(creds: krb::Credentials) -> Result<(), krb::Error>;
-}
-
-#[derive(Clone)]
-struct UserProcess;
-
-impl PrivSep for UserProcess {
-    async fn store_creds(self, _: context::Context, creds: krb::Credentials) -> Result<(), krb::Error> {
-        tracing::debug!("acquiring credentials cache lock");
-
-        let dir = env::var_os("XDG_RUNTIME_DIR")
-            .and_then(|d| fs::canonicalize(d).ok())
-            .unwrap_or(env::temp_dir());
-        let path = dir.join(format!("sybil.{}.lock", unistd::geteuid()));
-
-        let lock = fs::File::create(&path).map_err(|error| {
-            tracing::error!(%error, path = %path.display(), "could not create lock file");
-            krb::ErrorKind::CredCacheIO
-        })?;
-        let _lock = fcntl::Flock::lock(lock, FlockArg::LockExclusive).map_err(|(_, error)| {
-            tracing::error!(%error, path = %path.display(), "could not acquire lock file");
-            krb::ErrorKind::CredCacheIO
-        })?;
-
-        tracing::debug!("storing kerberos credentials");
-        creds.store()
-    }
-}
-
-fn spawn_user_process(user: &str) -> Result<(PrivSepClient, Child), PrivSepError> {
-    let (uid, gid) = unistd::User::from_name(user)
-        .context(LookupUser)?
-        .context(UserNotFound { user })
-        .map(|u| (u.uid, u.gid))?;
-    let env: Vec<(String, String)> = env::vars().filter(|(v, _)| v == "RUST_LOG").collect();
-
-    tracing::debug!(%user, "spawning user process");
-    let (stream, ustream) = UnixStream::pair()?;
-    let stdin = unsafe { Stdio::from_raw_fd(stream.as_raw_fd()) };
-    let mut cmd = Command::new(env::current_exe()?);
-    cmd.env_clear()
-        .envs(env)
-        .env(ENV_PRIVSEP_USER, user)
-        .current_dir("/")
-        .stdin(stdin)
-        .uid(uid.into())
-        .gid(gid.into());
-
-    let proc = unsafe {
-        cmd.pre_exec(|| {
-            close_fds::set_fds_cloexec(3, &[]);
-            Ok(())
-        })
-    }
-    .kill_on_drop(true)
-    .spawn()?;
-
-    let transport = Transport::from((ustream, Bincode::default()));
-    let ipc = PrivSepClient::new(Default::default(), transport).spawn();
-    Ok((ipc, proc))
-}
-
-#[tracing::instrument(fields(user = env::var(ENV_PRIVSEP_USER).unwrap()))]
-pub async fn serve_user_process() -> Result<(), Error> {
-    tracing::debug!("serving user process");
-    let stdin = unsafe { StdUnixStream::from_raw_fd(io::stdin().as_raw_fd()) };
-    let transport = UnixStream::from_std(stdin)
-        .map(|s| Transport::from((s, Bincode::default())))
-        .with_context(|error| {
-            tracing::error!(%error, "could not retrieve stream from stdin");
-            ServeProcess
-        })?;
-
-    BaseChannel::with_defaults(transport)
-        .execute(UserProcess.serve())
-        .for_each(|r| {
-            tokio::spawn(r).unwrap_or_else(|error| tracing::error!(%error, "could not execute task to completion"))
-        })
-        .await;
-    tracing::debug!("stopping user process");
-    Ok(())
+pub async fn do_privilege_separation() -> Result<(), Error> {
+    privsep::serve_user_process().map_err(Into::into).await
 }

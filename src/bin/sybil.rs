@@ -39,8 +39,8 @@ async fn main() -> Result<(), sybil::Error> {
         .with(EnvFilter::from_default_env())
         .init();
 
-    if std::env::var(sybil::ENV_PRIVSEP_USER).is_ok() {
-        return sybil::serve_user_process().await;
+    if std::env::var(sybil::PRIVSEP).is_ok() {
+        return sybil::do_privilege_separation().await;
     }
 
     let main_args: Arguments = argh::from_env();
