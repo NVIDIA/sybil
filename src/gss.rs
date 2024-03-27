@@ -89,7 +89,7 @@ pub fn new_client_ctx(clnt_princ: Option<&str>, serv_princ: &str, delegate: bool
         let clnt_princ = Name::new(clnt_princ.as_bytes(), Some(&GSS_NT_KRB5_PRINCIPAL))
             .context(InvalidPrincipal { princ: clnt_princ })?;
 
-        tracing::debug!(princ = %clnt_princ, "impersonating principal");
+        tracing::debug!(principal = %clnt_princ, "impersonating principal");
         cred = cred
             .impersonate(&clnt_princ, None, CredUsage::Initiate, Some(&mechs))
             .context(BadUserCreds {

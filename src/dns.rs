@@ -46,7 +46,7 @@ pub async fn lookup_address(addr: &IpAddr) -> Result<String, Error> {
 pub async fn lookup_service(srv: &str) -> Result<Vec<SocketAddr>, Error> {
     let resolver = AsyncResolver::tokio_from_system_conf().context(ServiceLookup { srv: srv.to_owned() })?;
 
-    tracing::debug!(service = srv, "resolving service record");
+    tracing::debug!(service = %srv, "resolving service record");
     let mut records = resolver
         .srv_lookup(srv)
         .await

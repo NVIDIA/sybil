@@ -170,7 +170,7 @@ impl Sybil for SybilServer {
             Some(&CONFIG.ticket.renew_lifetime),
         )
         .map_err(|error| {
-            tracing::error!(%error, user, "could not forge credentials");
+            tracing::error!(%error, %user, "could not forge credentials");
             SybilError::KerberosCreds
         })?;
 
@@ -211,7 +211,7 @@ pub async fn new_server(
         }
         None => {
             let addrs = format!("0.0.0.0:{SYBIL_PORT}");
-            tracing::info!(addrs, "starting sybil server");
+            tracing::info!(%addrs, "starting sybil server");
             tcp::listen(addrs, Bincode::default).await?
         }
     };
@@ -420,7 +420,7 @@ fn spawn_user_process(user: &str) -> Result<(PrivSepClient, Child), PrivSepError
         .map(|u| (u.uid, u.gid))?;
     let env: Vec<(String, String)> = env::vars().filter(|(v, _)| v == "RUST_LOG").collect();
 
-    tracing::debug!(user, "spawning user process");
+    tracing::debug!(%user, "spawning user process");
     let (stream, ustream) = UnixStream::pair()?;
     let stdin = unsafe { Stdio::from_raw_fd(stream.as_raw_fd()) };
     let mut cmd = Command::new(env::current_exe()?);
