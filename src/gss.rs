@@ -65,7 +65,12 @@ pub fn new_server_ctx(serv_princ: &str) -> Result<ServerCtx, Error> {
     Ok(ServerCtx::new(cred))
 }
 
-pub fn new_client_ctx(clnt_princ: Option<&str>, serv_princ: &str, delegate: bool) -> Result<ClientCtx, Error> {
+pub fn new_client_ctx(
+    clnt_princ: Option<&str>,
+    serv_princ: &str,
+    enterprise: bool,
+    delegate: bool,
+) -> Result<ClientCtx, Error> {
     let mut mechs = OidSet::new().unwrap();
     mechs.add(MECH).unwrap();
 
@@ -86,8 +91,13 @@ pub fn new_client_ctx(clnt_princ: Option<&str>, serv_princ: &str, delegate: bool
     let mut cred = Cred::acquire(None, None, CredUsage::Initiate, Some(&mechs)).context(BadHostCreds)?;
 
     if let Some(clnt_princ) = clnt_princ {
-        let clnt_princ = Name::new(clnt_princ.as_bytes(), Some(&GSS_NT_KRB5_PRINCIPAL))
-            .context(InvalidPrincipal { princ: clnt_princ })?;
+        let clnt_princ = Name::new(
+            clnt_princ.as_bytes(),
+            enterprise
+                .then_some(&GSS_NT_KRB5_ENTERPRISE_NAME)
+                .or(Some(&GSS_NT_KRB5_PRINCIPAL)),
+        )
+        .context(InvalidPrincipal { princ: clnt_princ })?;
 
         tracing::debug!(principal = %clnt_princ, "impersonating principal");
         cred = cred

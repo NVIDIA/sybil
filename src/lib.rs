@@ -247,7 +247,11 @@ pub async fn new_server(
     Ok(Server { rpc })
 }
 
-pub async fn new_client(addrs: Option<impl ToSocketAddrs + Display>, princ: Option<&str>) -> Result<Client, Error> {
+pub async fn new_client(
+    addrs: Option<impl ToSocketAddrs + Display>,
+    princ: Option<&str>,
+    enterprise: bool,
+) -> Result<Client, Error> {
     let transport = match addrs {
         Some(addrs) => {
             tracing::info!(%addrs, "connecting to sybil server");
@@ -262,7 +266,7 @@ pub async fn new_client(addrs: Option<impl ToSocketAddrs + Display>, princ: Opti
 
     let host = dns::lookup_address(&transport.peer_addr()?.ip()).await?;
     let rpc = SybilClient::new(Default::default(), transport).spawn();
-    let gss = gss::new_client_ctx(princ, &format!("{SYBIL_SERVICE}@{host}"), false)?;
+    let gss = gss::new_client_ctx(princ, &format!("{SYBIL_SERVICE}@{host}"), enterprise, false)?;
 
     Ok(Client { rpc, gss })
 }

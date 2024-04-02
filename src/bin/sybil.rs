@@ -26,6 +26,9 @@ enum Command {
 #[argh(subcommand, name = "kinit")]
 /// Obtains and caches an initial ticket-granting ticket for principal through protocol transition.
 struct KinitArguments {
+    /// treat principal as an enterprise name
+    #[argh(switch, short = 'E')]
+    enterprise: bool,
     /// principal to impersonate
     #[argh(positional)]
     principal: Option<String>,
@@ -47,7 +50,7 @@ async fn main() -> Result<(), sybil::Error> {
 
     match main_args.command {
         Command::Kinit(args) => {
-            let mut client = sybil::new_client(main_args.host, args.principal.as_deref()).await?;
+            let mut client = sybil::new_client(main_args.host, args.principal.as_deref(), args.enterprise).await?;
             client.authenticate().await?;
             client.kinit().await?;
         }
