@@ -1,18 +1,42 @@
-# Specify the encryption type used when forging ticket credentials
-tkt_cipher = "aes256-sha1"
-# Specify the flags used when forging ticket credentials
-tkt_flags = "FRI"
-# Specify the lifetime used when forging ticket credentials
-tkt_life = "10h"
-# Specify the renewable lifetime used when forging ticket credentials
-tkt_renew_life = "7d"
-# Allow requests based on specific networks
-allow_networks = []
-# Allow requests based on specific principal realms
-allow_realms = []
-# Allow requests based on specific group memberships
-allow_groups = []
-# Strip the domain off principals when matching an allowed realm
-strip_domain = false
-# Generate a cross-realm TGT for the given realm instead of a regular TGT
+########## Client configuration ##########
+
+[policy]
+# Force ticket delegation when not explicitly allowed by KDC policy
+force_delegate = false
+
+########## Server configuration ##########
+
+[policy]
+# Keep usernames fully qualified and use enterprise principals in tickets
+use_fully_qualified_username = false
+
+[ticket]
+# Specify the encryption type used when forging new tickets
+cipher = "aes256-sha1"
+# Specify the flags used when forging new tickets
+flags = "FR"
+# Specify the lifetime used when forging new tickets
+lifetime = "10h"
+# Specify the renewable lifetime used when forging new tickets
+renew_lifetime = "7d"
+# Generate a cross-realm ticket for the given realm instead of a regular one
 cross_realm = ""
+
+[[acl]]
+# Allow requests based on specific principal name regexp
+principal = ""
+# Allow requests based on specific user name regexp
+user = ""
+# Allow requests based on specific group membership regexp
+group = ""
+# Allow requests based on specific host network cidr
+hosts = []
+[acl.permissions]
+# Permission to kinit
+kinit = false
+# Permission to fetch and list
+read = false
+# Permission to store and delete
+write = false
+# Permission to masquerade as any user
+masquerade = false

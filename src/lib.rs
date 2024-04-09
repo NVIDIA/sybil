@@ -183,7 +183,7 @@ pub async fn new_server(
     addrs: Option<impl ToSocketAddrs + Display>,
     max_conn: usize,
 ) -> Result<Server<impl Future>, Error> {
-    conf::load_config();
+    conf::load_config_server();
 
     let transport = match addrs {
         Some(addrs) => {

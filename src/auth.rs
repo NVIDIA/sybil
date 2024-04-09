@@ -15,10 +15,10 @@ use std::{ffi::CString, fmt, net::IpAddr};
 bitflags! {
     #[derive(Default, Clone)]
     pub struct Permissions : u32 {
-        const KINIT  = 1;
-        const READ   = 1 << 1;
-        const WRITE  = 1 << 2;
-        const WORLD  = 1 << 3;
+        const KINIT      = 1;
+        const READ       = 1 << 1;
+        const WRITE      = 1 << 2;
+        const MASQUERADE = 1 << 3;
     }
 }
 
@@ -34,7 +34,7 @@ impl From<&conf::Permissions> for Permissions {
             | perms.kinit.then_some(Self::KINIT).unwrap_or_default()
             | perms.read.then_some(Self::READ).unwrap_or_default()
             | perms.write.then_some(Self::WRITE).unwrap_or_default()
-            | perms.world.then_some(Self::WORLD).unwrap_or_default()
+            | perms.masquerade.then_some(Self::MASQUERADE).unwrap_or_default()
     }
 }
 

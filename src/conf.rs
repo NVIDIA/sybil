@@ -26,11 +26,11 @@ pub struct Permissions {
     pub kinit: bool,
     pub read: bool,
     pub write: bool,
-    pub world: bool,
+    pub masquerade: bool,
 }
 
 #[serde_as]
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Acl {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub principal: Option<Regex>,
@@ -42,7 +42,7 @@ pub struct Acl {
     pub permissions: Permissions,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 #[serde(default)]
 pub struct Ticket {
     pub cipher: String,
@@ -58,7 +58,7 @@ pub struct Policy {
     pub use_fully_qualified_username: bool,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub policy: Policy,
@@ -86,7 +86,7 @@ impl fmt::Display for Permissions {
             if self.kinit { "k" } else { "-" },
             if self.read { "r" } else { "-" },
             if self.write { "w" } else { "-" },
-            if self.world { "W" } else { "-" }
+            if self.masquerade { "m" } else { "-" }
         )
     }
 }
@@ -111,20 +111,16 @@ fn new_config() -> Config {
         conf = conf.add_source(src);
     }
 
-    conf.add_source(
-        config::Environment::with_prefix("SYBIL")
-            .try_parsing(true)
-            .list_separator(","),
-    )
-    .build()
-    .and_then(config::Config::try_deserialize)
-    .unwrap_or_else(|error| {
-        tracing::warn!(%error, "could not load configuration");
-        Config::default()
-    })
+    conf.add_source(config::Environment::with_prefix("SYBIL"))
+        .build()
+        .and_then(config::Config::try_deserialize)
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "could not load configuration");
+            Config::default()
+        })
 }
 
-pub fn load_config() {
+pub fn load_config_server() {
     tracing::info!(
         use_fully_qualified_username = %CONFIG.policy.use_fully_qualified_username,
         "policy configuration"
@@ -132,7 +128,7 @@ pub fn load_config() {
     tracing::info!(
         cipher = %CONFIG.ticket.cipher,
         flags = %CONFIG.ticket.flags,
-        lifetime = %CONFIG.ticket.cipher,
+        lifetime = %CONFIG.ticket.lifetime,
         renew_lifetime = %CONFIG.ticket.renew_lifetime,
         cross_realm = CONFIG.ticket.cross_realm.display(),
         "ticket configuration"
