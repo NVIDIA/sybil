@@ -44,6 +44,22 @@ pub struct Identity {
     pub groups: Option<Vec<String>>,
 }
 
+impl Identity {
+    pub fn username(&self) -> Option<&str> {
+        let (_, realm) = self.principal.rsplit_once('@').unzip();
+
+        if CONFIG.policy.use_fully_qualified_username || realm.is_none() {
+            self.user.as_ref().map(|u| u.name.as_str())
+        } else {
+            self.user.as_ref().map(|u| {
+                u.name
+                    .strip_suffix(&format!("@{}", realm.unwrap().to_lowercase()))
+                    .unwrap_or(u.name.as_str())
+            })
+        }
+    }
+}
+
 #[rustfmt::skip]
 pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Permissions) -> Option<Identity> {
     tracing::debug!(%perms, "performing authorization checks");
@@ -97,8 +113,8 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
             }
         }
         if let Some(regex) = &rule.user {
-            if regex.as_str().trim().is_empty() || id.user.as_ref().map_or(true, |u| !regex.is_match(&u.name)) {
-                tracing::debug!(rule = r, user = id.user.as_ref().map(|u| &u.name).display(), "acl rule skipped due to user policy");
+            if regex.as_str().trim().is_empty() || id.username().map_or(true, |u| !regex.is_match(u)) {
+                tracing::debug!(rule = r, user = id.username().display(), "acl rule skipped due to user policy");
                 continue;
             }
         }
@@ -108,9 +124,9 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
                 continue;
             }
         }
-        tracing::debug!(principal = %id.principal, user = id.user.as_ref().map(|u| &u.name).display(), "successfully authorized");
+        tracing::debug!(principal = %id.principal, user = id.username().display(), "successfully authorized");
         return Some(id);
     }
-    tracing::debug!(principal = %id.principal, user = id.user.as_ref().map(|u| &u.name).display(), "permission denied");
+    tracing::debug!(principal = %id.principal, user = id.username().display(), "permission denied");
     None
 }

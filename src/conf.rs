@@ -52,9 +52,16 @@ pub struct Ticket {
     pub cross_realm: Option<String>,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(default)]
+pub struct Policy {
+    pub use_fully_qualified_username: bool,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
+    pub policy: Policy,
     pub ticket: Ticket,
     pub acl: Vec<Acl>,
 }
@@ -118,6 +125,10 @@ fn new_config() -> Config {
 }
 
 pub fn load_config() {
+    tracing::info!(
+        use_fully_qualified_username = %CONFIG.policy.use_fully_qualified_username,
+        "policy configuration"
+    );
     tracing::info!(
         cipher = %CONFIG.ticket.cipher,
         flags = %CONFIG.ticket.flags,

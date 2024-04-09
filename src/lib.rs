@@ -112,13 +112,10 @@ impl Sybil for SybilServer {
     async fn get_tgt(self, _: Context) -> Result<gss::Token, SybilError> {
         let id = &self.authorize(auth::Permissions::KINIT).await?;
 
-        let user = id.user.as_ref().map_or_else(
-            || {
-                tracing::warn!("request refused due to missing user");
-                Err(SybilError::Unauthorized)
-            },
-            |u| Ok(&u.name),
-        )?;
+        let user = id.username().ok_or_else(|| {
+            tracing::warn!("request refused due to missing user");
+            SybilError::Unauthorized
+        })?;
         let realm = krb::default_realm().map_err(|error| {
             tracing::error!(%error, "could not retrieve default realm");
             SybilError::KerberosCreds
