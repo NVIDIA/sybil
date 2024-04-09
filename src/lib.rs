@@ -249,6 +249,8 @@ pub async fn new_client(
     princ: Option<&str>,
     enterprise: bool,
 ) -> Result<Client, Error> {
+    conf::load_config_client();
+
     let transport = match addrs {
         Some(addrs) => {
             tracing::info!(%addrs, "connecting to sybil server");

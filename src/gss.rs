@@ -74,13 +74,13 @@ pub fn new_client_ctx(
     let mut mechs = OidSet::new().unwrap();
     mechs.add(MECH).unwrap();
 
-    let flags = if delegate {
-        CtxFlags::GSS_C_MUTUAL_FLAG | CtxFlags::GSS_C_CONF_FLAG | CtxFlags::GSS_C_INTEG_FLAG
-    } else {
-        CtxFlags::GSS_C_MUTUAL_FLAG
-            | CtxFlags::GSS_C_CONF_FLAG
-            | CtxFlags::GSS_C_INTEG_FLAG
-            | CtxFlags::GSS_C_DELEG_POLICY_FLAG
+    let mut flags = CtxFlags::GSS_C_MUTUAL_FLAG | CtxFlags::GSS_C_CONF_FLAG | CtxFlags::GSS_C_INTEG_FLAG;
+    if delegate {
+        if CONFIG.policy.force_delegate {
+            flags |= CtxFlags::GSS_C_DELEG_POLICY_FLAG | CtxFlags::GSS_C_DELEG_FLAG;
+        } else {
+            flags |= CtxFlags::GSS_C_DELEG_POLICY_FLAG;
+        }
     };
 
     let serv_princ = Name::new(serv_princ.as_bytes(), Some(&GSS_NT_HOSTBASED_SERVICE))

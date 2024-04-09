@@ -55,6 +55,7 @@ pub struct Ticket {
 #[derive(Default, Deserialize)]
 #[serde(default)]
 pub struct Policy {
+    pub force_delegate: bool,
     pub use_fully_qualified_username: bool,
 }
 
@@ -143,4 +144,11 @@ pub fn load_config_server() {
             "registered acl rule"
         )
     });
+}
+
+pub fn load_config_client() {
+    tracing::info!(
+        force_delegate = %CONFIG.policy.force_delegate,
+        "policy configuration"
+    );
 }
