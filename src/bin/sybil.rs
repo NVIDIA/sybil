@@ -20,6 +20,7 @@ struct Arguments {
 #[argh(subcommand)]
 enum Command {
     Kinit(KinitArguments),
+    Store(StoreArguments),
 }
 
 #[derive(FromArgs)]
@@ -33,6 +34,11 @@ struct KinitArguments {
     #[argh(positional)]
     principal: Option<String>,
 }
+
+#[derive(FromArgs)]
+#[argh(subcommand, name = "store")]
+/// Delegate the current credentials to the remote Sybil server for storage.
+struct StoreArguments {}
 
 #[tokio::main(flavor = "current_thread")]
 #[snafu::report]
@@ -50,9 +56,15 @@ async fn main() -> Result<(), sybil::Error> {
 
     match main_args.command {
         Command::Kinit(args) => {
-            let mut client = sybil::new_client(main_args.host, args.principal.as_deref(), args.enterprise).await?;
+            let mut client =
+                sybil::new_client(main_args.host, args.principal.as_deref(), args.enterprise, false).await?;
             client.authenticate().await?;
             client.kinit().await?;
+        }
+        Command::Store(_) => {
+            let mut client = sybil::new_client(main_args.host, None, false, true).await?;
+            client.authenticate().await?;
+            client.store().await?;
         }
     };
     Ok(())

@@ -3,21 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use libgssapi::{
-    context::CtxFlags,
-    credential::{Cred, CredUsage},
-    error::Error as GssError,
-    name::Name,
-    oid::*,
-    util::Buf,
-};
+use crate::conf::CONFIG;
+
+use libgssapi::{context::CtxFlags, credential::Cred, error::Error as GssError, name::Name, oid::*, util::Buf};
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 use std::{ops::Deref, string::FromUtf8Error};
 
-pub use libgssapi::context::{ClientCtx, SecurityContext, ServerCtx};
+pub use libgssapi::{
+    context::{ClientCtx, SecurityContext, ServerCtx},
+    credential::CredUsage,
+};
 
-static MECH: &Oid = &GSS_MECH_KRB5;
+pub static MECH: &Oid = &GSS_MECH_KRB5;
 
 #[derive(Debug, Snafu)]
 #[snafu(context(suffix(false)))]

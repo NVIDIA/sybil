@@ -12,10 +12,11 @@ mod privsep;
 mod trace;
 
 use crate::conf::CONFIG;
-use crate::gss::SecurityContext;
+use crate::gss::{CredUsage, SecurityContext, MECH};
 pub use crate::privsep::PRIVSEP;
 
 use futures::{join, prelude::*};
+use nix::errno::Errno;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 use std::{
@@ -24,6 +25,7 @@ use std::{
     net::IpAddr,
     ops::{Deref, DerefMut},
     sync::Arc,
+    thread,
 };
 use tarpc::{
     client::RpcError,
@@ -38,6 +40,7 @@ use tracing::Instrument;
 const SYBIL_PORT: u16 = 57811;
 const SYBIL_SERVICE: &str = "sybil";
 const SYBIL_SRV_RECORD: &str = "_sybil._tcp";
+const SYBIL_CREDS_STORE: &str = "KCM";
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -67,14 +70,19 @@ pub enum SybilError {
     GssHandshake,
     #[snafu(display("Error while encrypting communication"))]
     GssEncrypt,
+    #[snafu(display("Error while retrieving delegated credentials"))]
+    GssDelegate,
     #[snafu(display("Error while generating kerberos credentials"))]
     KerberosCreds,
+    #[snafu(display("Error while handling credentials storage"))]
+    CredsStore,
 }
 
 #[tarpc::service]
 trait Sybil {
     async fn gss_init(token: gss::Token) -> Result<Option<gss::Token>, SybilError>;
-    async fn get_tgt() -> Result<gss::Token, SybilError>;
+    async fn new_creds() -> Result<gss::Token, SybilError>;
+    async fn put_creds() -> Result<(), SybilError>;
 }
 
 #[derive(Clone)]
@@ -109,7 +117,7 @@ impl Sybil for SybilServer {
         Ok(tok)
     }
 
-    async fn get_tgt(self, _: Context) -> Result<gss::Token, SybilError> {
+    async fn new_creds(self, _: Context) -> Result<gss::Token, SybilError> {
         let id = &self.authorize(auth::Permissions::KINIT).await?;
 
         let user = id.username().ok_or_else(|| {
@@ -140,7 +148,9 @@ impl Sybil for SybilServer {
             format!("{}/{realm}", krb::TGS_NAME)
         };
 
-        tracing::debug!(%user, "forging kerberos credentials");
+        tracing::info!(%user, krbtgt = %princ, "new credentials request");
+
+        tracing::debug!("forging kerberos credentials");
         let creds = krb::forge_credentials(
             user,
             &princ,
@@ -165,6 +175,46 @@ impl Sybil for SybilServer {
                 SybilError::GssEncrypt
             })
             .map(Into::into)
+    }
+
+    async fn put_creds(self, _: Context) -> Result<(), SybilError> {
+        let id = &self.authorize(auth::Permissions::WRITE).await?;
+
+        let user = id.username().ok_or_else(|| {
+            tracing::warn!("request refused due to missing user");
+            SybilError::Unauthorized
+        })?;
+
+        tracing::info!(%user, principal = %id.principal, "put credentials request");
+
+        tracing::debug!("retrieving delegated credentials");
+        let gss = self.gss.lock().await;
+        let creds = gss.delegated_cred().ok_or_else(|| {
+            tracing::error!("delegated credentials not found in GSS context");
+            SybilError::GssDelegate
+        })?;
+
+        let (uid, gid) = id.user.as_ref().map(|u| (u.uid, u.gid)).unwrap();
+        let ccache = format!("{SYBIL_CREDS_STORE}:{uid}:{SYBIL_SERVICE}");
+        tracing::debug!(%ccache, "storing delegated credentials");
+
+        thread::scope(|s| {
+            let t = s.spawn(|| {
+                Errno::result(unsafe { libc::syscall(libc::SYS_setgid, gid) })
+                    .map_err(|err| format!("setgid {gid} failed: {err}"))?;
+                Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid) })
+                    .map_err(|err| format!("setuid {uid} failed: {err}"))?;
+
+                krb::create_ccache(&ccache, &id.principal)?;
+                creds
+                    .store(&ccache, true, false, CredUsage::Initiate, Some(MECH))
+                    .boxed()
+            });
+            t.join().unwrap().map_err(|error| {
+                tracing::error!(%error, "could not store credentials");
+                SybilError::CredsStore
+            })
+        })
     }
 }
 
@@ -248,6 +298,7 @@ pub async fn new_client(
     addrs: Option<impl ToSocketAddrs + Display>,
     princ: Option<&str>,
     enterprise: bool,
+    delegate: bool,
 ) -> Result<Client, Error> {
     conf::load_config_client();
 
@@ -265,7 +316,7 @@ pub async fn new_client(
 
     let host = dns::lookup_address(&transport.peer_addr()?.ip()).await?;
     let rpc = SybilClient::new(Default::default(), transport).spawn();
-    let gss = gss::new_client_ctx(princ, &format!("{SYBIL_SERVICE}@{host}"), enterprise, false)?;
+    let gss = gss::new_client_ctx(princ, &format!("{SYBIL_SERVICE}@{host}"), enterprise, delegate)?;
 
     Ok(Client { rpc, gss })
 }
@@ -310,7 +361,7 @@ impl Client {
     #[tracing::instrument(skip_all)]
     pub async fn kinit(&mut self) -> Result<(), Error> {
         tracing::info!("retrieving kerberos credentials");
-        let creds = self.rpc.get_tgt(context::current()).await??;
+        let creds = self.rpc.new_creds(context::current()).await??;
 
         tracing::info!("decrypting kerberos credentials");
         let creds: krb::Credentials = self
@@ -331,6 +382,14 @@ impl Client {
         let (resp, _) = join!(req, proc.wait());
 
         Ok(resp.context(privsep::IpcRequest)??)
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn store(&mut self) -> Result<(), Error> {
+        tracing::info!("sending kerberos credentials");
+        self.rpc.put_creds(context::current()).await??;
+
+        Ok(())
     }
 }
 
