@@ -35,6 +35,11 @@ pub const TGS_NAME: &str = match unsafe { CStr::from_bytes_with_nul_unchecked(cf
     Ok(str) => str,
     Err(_) => panic!("invalid UTF-8 in KRB5_TGS_NAME"),
 };
+pub const ANONYMOUS_REALMSTR: &str =
+    match unsafe { CStr::from_bytes_with_nul_unchecked(cffi::KRB5_ANONYMOUS_REALMSTR).to_str() } {
+        Ok(str) => str,
+        Err(_) => panic!("invalid UTF-8 in KRB5_ANONYMOUS_REALMSTR"),
+    };
 
 struct Context(cffi::krb5_context);
 

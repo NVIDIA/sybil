@@ -138,11 +138,14 @@ impl Sybil for SybilServer {
             return Err(SybilError::KerberosCreds);
         }
 
-        let princ = if CONFIG.ticket.cross_realm.as_ref().is_some_and(|r| !r.trim().is_empty()) {
+        let princ = if CONFIG.ticket.cross_realm {
             format!(
                 "{}/{realm}@{}",
                 krb::TGS_NAME,
-                CONFIG.ticket.cross_realm.as_ref().unwrap()
+                id.principal_realm()
+                    .map(str::to_uppercase)
+                    .as_deref()
+                    .unwrap_or(krb::ANONYMOUS_REALMSTR)
             )
         } else {
             format!("{}/{realm}", krb::TGS_NAME)

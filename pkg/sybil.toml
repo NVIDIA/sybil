@@ -19,8 +19,8 @@ flags = "FR"
 lifetime = "10h"
 # Specify the renewable lifetime used when forging new tickets
 renew_lifetime = "7d"
-# Generate a cross-realm ticket for the given realm instead of a regular one
-cross_realm = ""
+# Generate a cross-realm ticket instead of a regular one
+cross_realm = false
 
 [[acl]]
 # Allow requests based on specific principal name regexp

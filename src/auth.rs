@@ -45,8 +45,12 @@ pub struct Identity {
 }
 
 impl Identity {
+    pub fn principal_realm(&self) -> Option<&str> {
+        self.principal.rsplit_once('@').unzip().1
+    }
+
     pub fn username(&self) -> Option<&str> {
-        let (_, realm) = self.principal.rsplit_once('@').unzip();
+        let realm = self.principal_realm();
 
         if CONFIG.policy.use_fully_qualified_username || realm.is_none() {
             self.user.as_ref().map(|u| u.name.as_str())

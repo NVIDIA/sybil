@@ -49,7 +49,7 @@ pub struct Ticket {
     pub flags: String,
     pub lifetime: String,
     pub renew_lifetime: String,
-    pub cross_realm: Option<String>,
+    pub cross_realm: bool,
 }
 
 #[derive(Default, Deserialize)]
@@ -131,7 +131,7 @@ pub fn load_config_server() {
         flags = %CONFIG.ticket.flags,
         lifetime = %CONFIG.ticket.lifetime,
         renew_lifetime = %CONFIG.ticket.renew_lifetime,
-        cross_realm = CONFIG.ticket.cross_realm.display(),
+        cross_realm = %CONFIG.ticket.cross_realm,
         "ticket configuration"
     );
     CONFIG.acl.iter().for_each(|r| {
