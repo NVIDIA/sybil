@@ -24,4 +24,3 @@ krb5_error_code krbutil_forge_creds(krb5_context, krb5_data *, const char *, con
 krb5_error_code krbutil_local_user(krb5_context, char *, size_t, const char *)  __attribute__((nonnull(2,4)));
 krb5_error_code krbutil_local_user_creds(krb5_context, char *, size_t, const krb5_data *)  __attribute__((nonnull(2,4)));
 krb5_error_code krbutil_store_creds(krb5_context, const krb5_data *) __attribute__((nonnull(2)));
-krb5_error_code krbutil_create_ccache(krb5_context, const char *, const char *) __attribute__((nonnull(2,3)));

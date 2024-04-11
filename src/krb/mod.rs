@@ -217,20 +217,6 @@ pub fn default_realm() -> Result<String, Error> {
     }
 }
 
-pub fn create_ccache(ccache: &str, princ: &str) -> Result<(), Error> {
-    let ccache = CString::new(ccache)?;
-    let princ = CString::new(princ)?;
-
-    let ctx = CONTEXT.lock().unwrap();
-
-    let ret = unsafe { cffi::krbutil_create_ccache(ctx.0, ccache.as_ptr(), princ.as_ptr()) };
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(ret.into())
-    }
-}
-
 pub fn local_user(princ: &str) -> Result<String, Error> {
     let size = match unistd::sysconf(SysconfVar::LOGIN_NAME_MAX) {
         Ok(Some(n)) => n as usize,

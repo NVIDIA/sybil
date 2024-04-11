@@ -40,7 +40,7 @@ use tracing::Instrument;
 const SYBIL_PORT: u16 = 57811;
 const SYBIL_SERVICE: &str = "sybil";
 const SYBIL_SRV_RECORD: &str = "_sybil._tcp";
-const SYBIL_CREDS_STORE: &str = "KCM";
+const SYBIL_CREDS_STORE: &str = "KCM:";
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -198,8 +198,7 @@ impl Sybil for SybilServer {
         })?;
 
         let (uid, gid) = id.user.as_ref().map(|u| (u.uid, u.gid)).unwrap();
-        let ccache = format!("{SYBIL_CREDS_STORE}:{uid}:{SYBIL_SERVICE}");
-        tracing::debug!(%ccache, "storing delegated credentials");
+        tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "storing delegated credentials");
 
         thread::scope(|s| {
             let t = s.spawn(|| {
@@ -207,10 +206,8 @@ impl Sybil for SybilServer {
                     .map_err(|err| format!("setgid {gid} failed: {err}"))?;
                 Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid) })
                     .map_err(|err| format!("setuid {uid} failed: {err}"))?;
-
-                krb::create_ccache(&ccache, &id.principal)?;
                 creds
-                    .store(&ccache, true, false, CredUsage::Initiate, Some(MECH))
+                    .store(SYBIL_CREDS_STORE, true, false, CredUsage::Initiate, Some(MECH))
                     .boxed()
             });
             t.join().unwrap().map_err(|error| {

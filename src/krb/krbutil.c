@@ -353,27 +353,3 @@ out_creds:
 out_ccache:
         return (ret);
 }
-
-krb5_error_code krbutil_create_ccache(krb5_context ctx, const char *ccname, const char *cc_princ)
-{
-        krb5_error_code ret;
-        krb5_ccache ccache;
-        krb5_principal princ;
-
-        if (*cc_princ == '\0')
-                return (KRB5_PARSE_MALFORMED);
-        if (*ccname == '\0')
-                return (KRB5_CC_BADNAME);
-
-        ret = krb5_parse_name(ctx, cc_princ, &princ);
-        goto_out(ret, princ);
-        ret = krb5_cc_resolve(ctx, ccname, &ccache);
-        goto_out(ret, ccache);
-        ret = krb5_cc_initialize(ctx, ccache, princ);
-
-        krb5_cc_close(ctx, ccache);
-out_ccache:
-        krb5_free_principal(ctx, princ);
-out_princ:
-        return (ret);
-}
