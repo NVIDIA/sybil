@@ -133,7 +133,7 @@ impl Sybil for SybilServer {
             tracing::error!(%error, principal = %format!("{user}@{realm}"), "could not retrieve local user for principal");
             SybilError::KerberosCreds
         })?;
-        if user != &target_user {
+        if user != target_user {
             tracing::error!(%user, %realm, "translation mismatch for user principal in realm");
             return Err(SybilError::KerberosCreds);
         }

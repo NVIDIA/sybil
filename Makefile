@@ -1,3 +1,6 @@
+check:
+	cargo clippy
+
 debug:
 	cargo build
 
