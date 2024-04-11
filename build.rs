@@ -29,7 +29,6 @@ fn main() {
         .allowlist_var("KRB5_TGS_NAME")
         .allowlist_var("KRB5_ANONYMOUS_REALMSTR")
         .allowlist_var("KRB5_ERR_INVALID_UTF8")
-        .allowlist_var("KRB5_CC_IO")
         .allowlist_var("KV5M_DATA")
         .generate()
         .expect("failed to generate krbutil bindings");

@@ -6,14 +6,10 @@
 use crate::krb;
 
 use futures::prelude::*;
-use nix::{
-    errno::Errno,
-    fcntl::{self, FlockArg},
-    unistd,
-};
+use nix::{errno::Errno, unistd};
 use snafu::prelude::*;
 use std::{
-    env, fs, io,
+    env, io,
     os::unix::process::ExitStatusExt,
     os::{fd::AsRawFd, fd::FromRawFd, unix::net::UnixStream as StdUnixStream},
     process::Stdio,
@@ -60,22 +56,6 @@ struct UserProcess;
 
 impl PrivSep for UserProcess {
     async fn store_creds(self, _: context::Context, creds: krb::Credentials) -> Result<(), krb::Error> {
-        tracing::debug!("acquiring credentials cache lock");
-
-        let dir = env::var_os("XDG_RUNTIME_DIR")
-            .and_then(|d| fs::canonicalize(d).ok())
-            .unwrap_or(env::temp_dir());
-        let path = dir.join(format!("sybil.{}.lock", unistd::geteuid()));
-
-        let lock = fs::File::create(&path).map_err(|error| {
-            tracing::error!(%error, path = %path.display(), "could not create lock file");
-            krb::ErrorKind::CredCacheIO
-        })?;
-        let _lock = fcntl::Flock::lock(lock, FlockArg::LockExclusive).map_err(|(_, error)| {
-            tracing::error!(%error, path = %path.display(), "could not acquire lock file");
-            krb::ErrorKind::CredCacheIO
-        })?;
-
         tracing::debug!("storing kerberos credentials");
         creds.store()
     }

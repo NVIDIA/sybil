@@ -48,11 +48,6 @@ lazy_static! {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Error(cffi::krb5_error_code);
 
-#[repr(i32)]
-pub enum ErrorKind {
-    CredCacheIO = cffi::KRB5_CC_IO,
-}
-
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         None
@@ -69,12 +64,6 @@ impl fmt::Display for Error {
             cffi::krb5_free_error_message(ctx.0, err);
             res
         }
-    }
-}
-
-impl From<ErrorKind> for Error {
-    fn from(kind: ErrorKind) -> Self {
-        Self(kind as i32)
     }
 }
 
