@@ -176,11 +176,10 @@ pub fn default_realm() -> Result<String, Error> {
         let mut ptr = ptr::null_mut::<raw::c_char>();
         let ret = cffi::krb5_get_default_realm(ctx.0, &mut ptr);
         if ret == 0 {
-            let realm = CStr::from_ptr(ptr).to_str()?.to_owned();
+            let realm = CStr::from_ptr(ptr).to_str().map(str::to_owned);
             cffi::krb5_free_default_realm(ctx.0, ptr);
-            Ok(realm)
+            Ok(realm?)
         } else {
-            cffi::krb5_free_default_realm(ctx.0, ptr);
             Err(ret.into())
         }
     }
