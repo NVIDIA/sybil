@@ -86,7 +86,9 @@ pub fn spawn_user_process(user: &str) -> Result<(PrivSepClient, PrivSepChild), E
         .context(LookupUser)?
         .context(UserNotFound { user })
         .map(|u| (u.uid, u.gid))?;
-    let env: Vec<(String, String)> = env::vars().filter(|(v, _)| v == "RUST_LOG").collect();
+    let env: Vec<(String, String)> = env::vars()
+        .filter(|(v, _)| v == "RUST_LOG" || v == "KRB5_TRACE")
+        .collect();
 
     tracing::debug!(%user, "spawning user process");
     let (stream, ustream) = UnixStream::pair()?;
