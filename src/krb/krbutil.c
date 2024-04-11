@@ -181,17 +181,18 @@ out_keys:
         return (krb5_error_code)(ret);
 }
 
-static krb5_error_code encode_credentials(krb5_context ctx,
-                                          const krb5_ticket *tkt,
-                                          krb5_data *creds)
+static krb5_error_code encode_ticket(krb5_context ctx,
+                                     const krb5_ticket *tkt,
+                                     krb5_data **cred_data)
 {
         krb5_error_code ret;
         krb5_data *ticket;
+        krb5_auth_context auth;
 
         ret = encode_krb5_ticket(tkt, &ticket);
         goto_out(ret, ticket);
 
-        krb5_creds cred = {
+        krb5_creds creds = {
                 .magic = KV5M_CREDS,
                 .client = tkt->enc_part2->client,
                 .server = tkt->server,
@@ -203,20 +204,13 @@ static krb5_error_code encode_credentials(krb5_context ctx,
                 .authdata = tkt->enc_part2->authorization_data,
                 .ticket = *ticket,
         };
-        // FIXME: Replace with krb5_marshal_credentials once we move to libkrb5 1.20.
-        //ret = krb5_marshal_credentials(ctx, &cred, creds);
-        struct k5buf buf;
-        k5_buf_init_dynamic(&buf);
-        k5_marshal_cred(&buf, 4, &cred);
-        ret = k5_buf_status(&buf);
-        goto_out(ret, buf);
-        *creds = (krb5_data){
-                .magic = KV5M_DATA,
-                .data = buf.data,
-                .length = buf.len,
-        };
+        ret = krb5_auth_con_init(ctx, &auth);
+        goto_out(ret, auth);
+        krb5_auth_con_setflags(ctx, auth, 0);
+        ret = krb5_mk_1cred(ctx, auth, &creds, cred_data, NULL);
 
-out_buf:
+        krb5_auth_con_free(ctx, auth);
+out_auth:
         explicit_bzero(ticket->data, ticket->length);
         krb5_free_data(ctx, ticket);
 out_ticket:
@@ -224,7 +218,7 @@ out_ticket:
 }
 
 krb5_error_code krbutil_forge_creds(krb5_context ctx,
-                                    krb5_data *creds,
+                                    krb5_data **cred_data,
                                     const char *clnt_princ,
                                     const char *serv_princ,
                                     const char *enc_type,
@@ -281,7 +275,7 @@ krb5_error_code krbutil_forge_creds(krb5_context ctx,
         ret = encrypt_ticket(ctx, serv, enc, &tkt);
         goto_out(ret, tkt);
 
-        ret = encode_credentials(ctx, &tkt, creds);
+        ret = encode_ticket(ctx, &tkt, cred_data);
 
         explicit_bzero(tkt.enc_part.ciphertext.data, tkt.enc_part.ciphertext.length);
         krb5_free_data_contents(ctx, &tkt.enc_part.ciphertext);
@@ -317,39 +311,67 @@ out_princ:
 krb5_error_code krbutil_local_user_creds(krb5_context ctx, char *user, size_t size, const krb5_data *cred_data)
 {
         krb5_error_code ret;
-        krb5_creds creds;
+        krb5_auth_context auth;
+        krb5_creds **creds;
 
-        ret = k5_unmarshal_cred(cred_data->data, cred_data->length, 4, &creds);
+        ret = krb5_auth_con_init(ctx, &auth);
+        goto_out(ret, auth);
+        krb5_auth_con_setflags(ctx, auth, 0);
+        ret = krb5_rd_cred(ctx, auth, (krb5_data *)cred_data, &creds, NULL);
         goto_out(ret, creds);
-        ret = krb5_aname_to_localname(ctx, creds.client, size, user);
 
-        explicit_bzero(creds.ticket.data, creds.ticket.length);
-        explicit_bzero(creds.keyblock.contents, creds.keyblock.length);
-        krb5_free_cred_contents(ctx, &creds);
+        ret = krb5_aname_to_localname(ctx, creds[0]->client, size, user);
+
+        for (size_t i = 0; creds[i] != NULL; ++i) {
+                explicit_bzero(creds[i]->ticket.data, creds[i]->ticket.length);
+                explicit_bzero(creds[i]->keyblock.contents, creds[i]->keyblock.length);
+        }
+        krb5_free_tgt_creds(ctx, creds);
 out_creds:
+        krb5_auth_con_free(ctx, auth);
+out_auth:
         return (ret);
 }
 
 krb5_error_code krbutil_store_creds(krb5_context ctx, const krb5_data *cred_data)
 {
         krb5_error_code ret;
-        krb5_ccache ccache;
-        krb5_creds creds;
+        krb5_auth_context auth;
+        krb5_ccache ccache, ccache_mem;
+        krb5_creds **creds;
+
+        ret = krb5_auth_con_init(ctx, &auth);
+        goto_out(ret, auth);
+        krb5_auth_con_setflags(ctx, auth, 0);
+        ret = krb5_rd_cred(ctx, auth, (krb5_data *)cred_data, &creds, NULL);
+        goto_out(ret, creds);
 
         ret = krb5_cc_default(ctx, &ccache);
         goto_out(ret, ccache);
-        ret = k5_unmarshal_cred(cred_data->data, cred_data->length, 4, &creds);
-        goto_out(ret, creds);
-        ret = krb5_cc_initialize(ctx, ccache, creds.client);
+        ret = krb5_cc_new_unique(ctx, "MEMORY", NULL, &ccache_mem);
+        goto_out(ret, ccache_mem);
+        ret = krb5_cc_initialize(ctx, ccache_mem, creds[0]->client);
         goto_out(ret, init);
-        ret = krb5_cc_store_cred(ctx, ccache, &creds);
+        for (size_t i = 0; creds[i] != NULL; ++i) {
+                ret = krb5_cc_store_cred(ctx, ccache_mem, creds[i]);
+                goto_out(ret, init);
+        }
+        ret = krb5_cc_move(ctx, ccache_mem, ccache);
+        goto_out(ret, init);
+        goto out_ccache_mem;
 
 out_init:
-        explicit_bzero(creds.ticket.data, creds.ticket.length);
-        explicit_bzero(creds.keyblock.contents, creds.keyblock.length);
-        krb5_free_cred_contents(ctx, &creds);
-out_creds:
+        krb5_cc_destroy(ctx, ccache_mem);
+out_ccache_mem:
         krb5_cc_close(ctx, ccache);
 out_ccache:
+        for (size_t i = 0; creds[i] != NULL; ++i) {
+                explicit_bzero(creds[i]->ticket.data, creds[i]->ticket.length);
+                explicit_bzero(creds[i]->keyblock.contents, creds[i]->keyblock.length);
+        }
+        krb5_free_tgt_creds(ctx, creds);
+out_creds:
+        krb5_auth_con_free(ctx, auth);
+out_auth:
         return (ret);
 }

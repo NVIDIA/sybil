@@ -3,17 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use core::ffi::FromBytesUntilNulError;
 use lazy_static::lazy_static;
 use nix::unistd::{self, SysconfVar};
-use serde::{
-    de::{value::BytesDeserializer, Error as DeserializeError, Visitor},
-    Deserialize, Deserializer, Serialize, Serializer,
-};
+use serde::{Deserialize, Serialize, Serializer};
 use std::{
     error,
-    ffi::{CStr, CString, IntoStringError, NulError},
-    fmt, io, mem,
+    ffi::{CStr, CString, FromBytesUntilNulError, IntoStringError, NulError},
+    fmt,
     ops::Deref,
     os::raw,
     ptr,
@@ -63,21 +59,6 @@ impl error::Error for Error {
     }
 }
 
-impl From<ErrorKind> for Error {
-    fn from(kind: ErrorKind) -> Self {
-        Self(kind as i32)
-    }
-}
-
-impl DeserializeError for Error {
-    fn custom<T>(_: T) -> Self
-    where
-        T: fmt::Display,
-    {
-        Self(libc::ENOMEM)
-    }
-}
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let ctx = CONTEXT.lock().unwrap();
@@ -88,6 +69,12 @@ impl fmt::Display for Error {
             cffi::krb5_free_error_message(ctx.0, err);
             res
         }
+    }
+}
+
+impl From<ErrorKind> for Error {
+    fn from(kind: ErrorKind) -> Self {
+        Self(kind as i32)
     }
 }
 
@@ -121,66 +108,55 @@ impl From<Utf8Error> for Error {
     }
 }
 
-impl Serialize for cffi::krb5_data {
+#[derive(Debug, Deserialize)]
+#[serde(try_from = "&[u8]")]
+pub struct Credentials(*mut cffi::krb5_data);
+
+unsafe impl Send for Credentials {}
+
+impl Drop for Credentials {
+    fn drop(&mut self) {
+        let ctx = CONTEXT.lock().unwrap();
+
+        if !self.0.is_null() {
+            unsafe {
+                libc::explicit_bzero((*self.0).data as *mut raw::c_void, (*self.0).length as usize);
+                cffi::krb5_free_data(ctx.0, self.0);
+            }
+        }
+    }
+}
+
+impl Serialize for Credentials {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        unsafe { serializer.serialize_bytes(slice::from_raw_parts(self.data as *const u8, self.length as usize)) }
+        serializer.serialize_bytes(self)
     }
 }
-
-impl<'a> Deserialize<'a> for cffi::krb5_data {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'a>,
-    {
-        struct DataVisitor;
-
-        impl<'a> Visitor<'a> for DataVisitor {
-            type Value = cffi::krb5_data;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(formatter, "a byte buffer")
-            }
-
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where
-                E: DeserializeError,
-            {
-                unsafe {
-                    let data = libc::malloc(mem::size_of_val(v)) as *mut u8;
-                    if data.is_null() {
-                        return Err(E::custom(io::ErrorKind::OutOfMemory));
-                    }
-                    data.copy_from_nonoverlapping(v.as_ptr(), v.len());
-
-                    Ok(cffi::krb5_data {
-                        magic: cffi::KV5M_DATA,
-                        data: data as *mut i8,
-                        length: v.len().try_into().map_err(E::custom)?,
-                    })
-                }
-            }
-        }
-
-        deserializer.deserialize_bytes(DataVisitor)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Credentials(cffi::krb5_data);
-
-unsafe impl Send for Credentials {}
 
 impl TryFrom<&[u8]> for Credentials {
     type Error = Error;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let deserializer = BytesDeserializer::<'_, Error>::new(bytes);
-        let data = cffi::krb5_data::deserialize(deserializer)?;
+        let ctx = CONTEXT.lock().unwrap();
 
-        Ok(Self(data))
+        unsafe {
+            let data = cffi::krb5_data {
+                magic: cffi::KV5M_DATA,
+                data: bytes.as_ptr() as *mut raw::c_char,
+                length: bytes.len().try_into().map_err(|_| libc::ENOMEM)?,
+            };
+            let mut creds = ptr::null_mut::<cffi::krb5_data>();
+
+            let ret = cffi::krb5_copy_data(ctx.0, &data, &mut creds);
+            if ret == 0 {
+                Ok(Credentials(creds))
+            } else {
+                Err(ret.into())
+            }
+        }
     }
 }
 
@@ -188,15 +164,8 @@ impl Deref for Credentials {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        unsafe { slice::from_raw_parts(self.0.data as *const u8, self.0.length as usize) }
-    }
-}
-
-impl Drop for Credentials {
-    fn drop(&mut self) {
-        let ctx = CONTEXT.lock().unwrap();
-
-        unsafe { cffi::krb5_free_data_contents(ctx.0, &mut self.0) }
+        assert!(!self.0.is_null());
+        unsafe { slice::from_raw_parts((*self.0).data as *const u8, (*self.0).length as usize) }
     }
 }
 
@@ -245,7 +214,7 @@ pub fn forge_credentials(
     end_time: Option<&str>,
     renew_till: Option<&str>,
 ) -> Result<Credentials, Error> {
-    let mut creds = unsafe { Credentials(mem::zeroed()) };
+    let mut creds = Credentials(ptr::null_mut());
     let clnt_princ = CString::new(clnt_princ)?;
     let serv_princ = CString::new(serv_princ)?;
     let enc_type = CString::new(enc_type)?;
@@ -286,8 +255,8 @@ impl Credentials {
 
         let ctx = CONTEXT.lock().unwrap();
 
-        let ret =
-            unsafe { cffi::krbutil_local_user_creds(ctx.0, user.as_mut_ptr() as *mut raw::c_char, size, &self.0) };
+        assert!(!self.0.is_null());
+        let ret = unsafe { cffi::krbutil_local_user_creds(ctx.0, user.as_mut_ptr() as *mut raw::c_char, size, self.0) };
         if ret == 0 {
             unsafe { user.set_len(size) };
             Ok(CStr::from_bytes_until_nul(&user)?.to_owned().into_string()?)
@@ -299,7 +268,8 @@ impl Credentials {
     pub fn store(&self) -> Result<(), Error> {
         let ctx = CONTEXT.lock().unwrap();
 
-        let ret = unsafe { cffi::krbutil_store_creds(ctx.0, &self.0) };
+        assert!(!self.0.is_null());
+        let ret = unsafe { cffi::krbutil_store_creds(ctx.0, self.0) };
         if ret == 0 {
             Ok(())
         } else {

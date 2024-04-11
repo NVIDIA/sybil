@@ -18,6 +18,8 @@ fn main() {
         .layout_tests(false)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_type("krb5_data")
+        .allowlist_function("krb5_copy_data")
+        .allowlist_function("krb5_free_data")
         .allowlist_function("krb5_get_default_realm")
         .allowlist_function("krb5_free_default_realm")
         .allowlist_function("krb5_free_data_contents")
