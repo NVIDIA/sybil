@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::conf::{self, CONFIG};
+use crate::conf::{self, config};
 use crate::gss::{self, SecurityContextExt};
 use crate::utils::*;
 
@@ -52,7 +52,7 @@ impl Identity {
     pub fn username(&self) -> Option<&str> {
         let realm = self.principal_realm();
 
-        if CONFIG.policy.use_fully_qualified_username || realm.is_none() {
+        if config().policy.use_fully_qualified_username || realm.is_none() {
             self.user.as_ref().map(|u| u.name.as_str())
         } else {
             self.user.as_ref().map(|u| {
@@ -95,7 +95,7 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
 
     let id = Identity { principal, user, groups };
 
-    for (r, rule) in CONFIG.acl.iter().enumerate() {
+    for (r, rule) in config().acl.iter().enumerate() {
         if let conf::Acl{principal: None, user: None, group: None, hosts: None, permissions: _} = rule {
             continue;
         }

@@ -9,16 +9,12 @@ use netaddr2::NetAddr;
 use regex_lite::Regex;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
-use std::{env, fmt, path::Path};
+use std::{env, fmt, path::Path, sync::OnceLock};
 
 const DEFAULT_TKT_CIPHER: &str = "aes256-sha1";
 const DEFAULT_TKT_FLAGS: &str = "FR";
 const DEFAULT_TKT_LIFETIME: &str = "10h";
 const DEFAULT_TKT_RENEW_LIFETIME: &str = "7d";
-
-lazy_static::lazy_static! {
-    pub static ref CONFIG: Config = new_config();
-}
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -92,49 +88,53 @@ impl fmt::Display for Permissions {
     }
 }
 
-fn new_config() -> Config {
-    let mut conf = config::Config::builder();
+pub fn config() -> &'static Config {
+    static CONFIG: OnceLock<Config> = OnceLock::new();
 
-    if let Some(src) = option_env!("PREFIX")
-        .map_or("/".as_ref(), Path::new)
-        .join("etc/sybil")
-        .to_str()
-        .map(|f| config::File::with_name(f).required(false))
-    {
-        conf = conf.add_source(src);
-    }
+    CONFIG.get_or_init(|| {
+        let mut conf = config::Config::builder();
 
-    if let Some(src) = env::var("SYBIL_CONFIG")
-        .ok()
-        .filter(|p| !p.trim().is_empty())
-        .map(|f| config::File::with_name(&f).required(false))
-    {
-        conf = conf.add_source(src);
-    }
+        if let Some(src) = option_env!("PREFIX")
+            .map_or("/".as_ref(), Path::new)
+            .join("etc/sybil")
+            .to_str()
+            .map(|f| config::File::with_name(f).required(false))
+        {
+            conf = conf.add_source(src);
+        }
 
-    conf.add_source(config::Environment::with_prefix("SYBIL"))
-        .build()
-        .and_then(config::Config::try_deserialize)
-        .unwrap_or_else(|error| {
-            tracing::warn!(%error, "could not load configuration");
-            Config::default()
-        })
+        if let Some(src) = env::var("SYBIL_CONFIG")
+            .ok()
+            .filter(|p| !p.trim().is_empty())
+            .map(|f| config::File::with_name(&f).required(false))
+        {
+            conf = conf.add_source(src);
+        }
+
+        conf.add_source(config::Environment::with_prefix("SYBIL"))
+            .build()
+            .and_then(config::Config::try_deserialize)
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "could not load configuration");
+                Config::default()
+            })
+    })
 }
 
-pub fn load_config_server() {
+pub fn print_server_config() {
     tracing::info!(
-        use_fully_qualified_username = %CONFIG.policy.use_fully_qualified_username,
+        use_fully_qualified_username = %config().policy.use_fully_qualified_username,
         "policy configuration"
     );
     tracing::info!(
-        cipher = %CONFIG.ticket.cipher,
-        flags = %CONFIG.ticket.flags,
-        lifetime = %CONFIG.ticket.lifetime,
-        renew_lifetime = %CONFIG.ticket.renew_lifetime,
-        cross_realm = %CONFIG.ticket.cross_realm,
+        cipher = %config().ticket.cipher,
+        flags = %config().ticket.flags,
+        lifetime = %config().ticket.lifetime,
+        renew_lifetime = %config().ticket.renew_lifetime,
+        cross_realm = %config().ticket.cross_realm,
         "ticket configuration"
     );
-    CONFIG.acl.iter().for_each(|r| {
+    config().acl.iter().for_each(|r| {
         tracing::info!(
             principal = r.principal.display(),
             user = r.user.display(),
@@ -146,9 +146,9 @@ pub fn load_config_server() {
     });
 }
 
-pub fn load_config_client() {
+pub fn print_client_config() {
     tracing::info!(
-        force_delegate = %CONFIG.policy.force_delegate,
+        force_delegate = %config().policy.force_delegate,
         "policy configuration"
     );
 }

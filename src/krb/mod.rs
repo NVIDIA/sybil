@@ -5,7 +5,6 @@
 
 use crate::utils::*;
 
-use lazy_static::lazy_static;
 use nix::unistd::{self, SysconfVar};
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
@@ -18,7 +17,7 @@ use std::{
     result::Result,
     slice,
     str::Utf8Error,
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
 };
 
 mod cffi {
@@ -36,8 +35,10 @@ struct Context(cffi::krb5_context);
 
 unsafe impl Send for Context {}
 
-lazy_static! {
-    static ref CONTEXT: Mutex<Context> = unsafe { Mutex::new(Context(cffi::krbutil_context())) };
+fn context() -> &'static Mutex<Context> {
+    static CONTEXT: OnceLock<Mutex<Context>> = OnceLock::new();
+
+    CONTEXT.get_or_init(|| Mutex::new(Context(unsafe { cffi::krbutil_context() })))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,7 +52,7 @@ impl error::Error for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let ctx = CONTEXT.lock().unwrap();
+        let ctx = context().lock().unwrap();
 
         unsafe {
             let err = cffi::krb5_get_error_message(ctx.0, self.0);
@@ -100,7 +101,7 @@ unsafe impl Send for Credentials {}
 
 impl Drop for Credentials {
     fn drop(&mut self) {
-        let ctx = CONTEXT.lock().unwrap();
+        let ctx = context().lock().unwrap();
 
         if !self.0.is_null() {
             unsafe {
@@ -124,7 +125,7 @@ impl TryFrom<&[u8]> for Credentials {
     type Error = Error;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let ctx = CONTEXT.lock().unwrap();
+        let ctx = context().lock().unwrap();
 
         unsafe {
             let data = cffi::krb5_data {
@@ -154,7 +155,7 @@ impl Deref for Credentials {
 }
 
 pub fn default_realm() -> Result<String, Error> {
-    let ctx = CONTEXT.lock().unwrap();
+    let ctx = context().lock().unwrap();
 
     unsafe {
         let mut ptr = ptr::null_mut::<raw::c_char>();
@@ -177,7 +178,7 @@ pub fn local_user(princ: &str) -> Result<String, Error> {
     let mut user = Vec::<u8>::with_capacity(size);
     let princ = CString::new(princ)?;
 
-    let ctx = CONTEXT.lock().unwrap();
+    let ctx = context().lock().unwrap();
 
     let ret = unsafe { cffi::krbutil_local_user(ctx.0, user.as_mut_ptr() as *mut raw::c_char, size, princ.as_ptr()) };
     if ret == 0 {
@@ -206,7 +207,7 @@ pub fn forge_credentials(
     let end_time = end_time.map(CString::new).transpose()?;
     let renew_till = renew_till.map(CString::new).transpose()?;
 
-    let ctx = CONTEXT.lock().unwrap();
+    let ctx = context().lock().unwrap();
 
     let ret = unsafe {
         cffi::krbutil_forge_creds(
@@ -236,7 +237,7 @@ impl Credentials {
         };
         let mut user = Vec::<u8>::with_capacity(size);
 
-        let ctx = CONTEXT.lock().unwrap();
+        let ctx = context().lock().unwrap();
 
         assert!(!self.0.is_null());
         let ret = unsafe { cffi::krbutil_local_user_creds(ctx.0, user.as_mut_ptr() as *mut raw::c_char, size, self.0) };
@@ -249,7 +250,7 @@ impl Credentials {
     }
 
     pub fn store(&self) -> Result<(), Error> {
-        let ctx = CONTEXT.lock().unwrap();
+        let ctx = context().lock().unwrap();
 
         assert!(!self.0.is_null());
         let ret = unsafe { cffi::krbutil_store_creds(ctx.0, self.0) };

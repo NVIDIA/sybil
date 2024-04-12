@@ -1375,7 +1375,6 @@ dependencies = [
  "close_fds",
  "config",
  "futures",
- "lazy_static",
  "libc",
  "libgssapi",
  "netaddr2",

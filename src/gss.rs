@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::conf::CONFIG;
+use crate::conf::config;
 
 use libgssapi::{context::CtxFlags, credential::Cred, error::Error as GssError, name::Name, oid::*, util::Buf};
 use serde::{Deserialize, Serialize};
@@ -74,7 +74,7 @@ pub fn new_client_ctx(
 
     let mut flags = CtxFlags::GSS_C_MUTUAL_FLAG | CtxFlags::GSS_C_CONF_FLAG | CtxFlags::GSS_C_INTEG_FLAG;
     if delegate {
-        if CONFIG.policy.force_delegate {
+        if config().policy.force_delegate {
             flags |= CtxFlags::GSS_C_DELEG_POLICY_FLAG | CtxFlags::GSS_C_DELEG_FLAG;
         } else {
             flags |= CtxFlags::GSS_C_DELEG_POLICY_FLAG;

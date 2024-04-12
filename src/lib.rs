@@ -11,7 +11,7 @@ mod krb;
 mod privsep;
 mod utils;
 
-use crate::conf::CONFIG;
+use crate::conf::config;
 use crate::gss::{CredUsage, SecurityContext, MECH};
 pub use crate::privsep::PRIVSEP;
 
@@ -138,7 +138,7 @@ impl Sybil for SybilServer {
             return Err(SybilError::KerberosCreds);
         }
 
-        let princ = if CONFIG.ticket.cross_realm {
+        let princ = if config().ticket.cross_realm {
             format!(
                 "{}/{realm}@{}",
                 krb::TGS_NAME,
@@ -157,11 +157,11 @@ impl Sybil for SybilServer {
         let creds = krb::forge_credentials(
             user,
             &princ,
-            &CONFIG.ticket.cipher,
-            &CONFIG.ticket.flags,
+            &config().ticket.cipher,
+            &config().ticket.flags,
             None,
-            Some(&CONFIG.ticket.lifetime),
-            Some(&CONFIG.ticket.renew_lifetime),
+            Some(&config().ticket.lifetime),
+            Some(&config().ticket.renew_lifetime),
         )
         .map_err(|error| {
             tracing::error!(%error, %user, "could not forge credentials");
@@ -233,7 +233,7 @@ pub async fn new_server(
     addrs: Option<impl ToSocketAddrs + Display>,
     max_conn: usize,
 ) -> Result<Server<impl Future>, Error> {
-    conf::load_config_server();
+    conf::print_server_config();
 
     let transport = match addrs {
         Some(addrs) => {
@@ -300,7 +300,7 @@ pub async fn new_client(
     enterprise: bool,
     delegate: bool,
 ) -> Result<Client, Error> {
-    conf::load_config_client();
+    conf::print_client_config();
 
     let transport = match addrs {
         Some(addrs) => {
