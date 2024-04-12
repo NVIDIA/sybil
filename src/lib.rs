@@ -9,7 +9,7 @@ mod dns;
 mod gss;
 mod krb;
 mod privsep;
-mod trace;
+mod utils;
 
 use crate::conf::CONFIG;
 use crate::gss::{CredUsage, SecurityContext, MECH};

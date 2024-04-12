@@ -5,7 +5,7 @@
 
 use crate::conf::{self, CONFIG};
 use crate::gss::{self, SecurityContextExt};
-use crate::trace::*;
+use crate::utils::*;
 
 use bitflags::bitflags;
 use netaddr2::Contains;

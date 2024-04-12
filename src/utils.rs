@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use std::fmt;
+use std::{ffi::CStr, fmt};
 
 pub trait DisplayOptExt {
     fn display<'a>(&'a self) -> Box<dyn tracing::Value + 'a>;
@@ -30,5 +30,12 @@ impl<T: fmt::Debug> DebugOptExt for Option<T> {
         } else {
             Box::new(tracing::field::Empty)
         }
+    }
+}
+
+pub const fn const_cstr(cstr: &[u8]) -> &str {
+    match unsafe { CStr::from_bytes_with_nul_unchecked(cstr).to_str() } {
+        Ok(s) => s,
+        Err(_) => panic!("invalid UTF-8 in C string"),
     }
 }

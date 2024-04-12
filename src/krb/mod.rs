@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::utils::*;
+
 use lazy_static::lazy_static;
 use nix::unistd::{self, SysconfVar};
 use serde::{Deserialize, Serialize, Serializer};
@@ -27,15 +29,8 @@ mod cffi {
     include!(concat!(env!("OUT_DIR"), "/krbutil.rs"));
 }
 
-pub const TGS_NAME: &str = match unsafe { CStr::from_bytes_with_nul_unchecked(cffi::KRB5_TGS_NAME).to_str() } {
-    Ok(str) => str,
-    Err(_) => panic!("invalid UTF-8 in KRB5_TGS_NAME"),
-};
-pub const ANONYMOUS_REALMSTR: &str =
-    match unsafe { CStr::from_bytes_with_nul_unchecked(cffi::KRB5_ANONYMOUS_REALMSTR).to_str() } {
-        Ok(str) => str,
-        Err(_) => panic!("invalid UTF-8 in KRB5_ANONYMOUS_REALMSTR"),
-    };
+pub const TGS_NAME: &str = const_cstr(cffi::KRB5_TGS_NAME);
+pub const ANONYMOUS_REALMSTR: &str = const_cstr(cffi::KRB5_ANONYMOUS_REALMSTR);
 
 struct Context(cffi::krb5_context);
 
