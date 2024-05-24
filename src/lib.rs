@@ -14,9 +14,13 @@ mod utils;
 use crate::conf::config;
 use crate::gss::{CredUsage, SecurityContext, MECH};
 pub use crate::privsep::PRIVSEP;
+use crate::utils::*;
 
 use futures::{join, prelude::*};
-use nix::errno::Errno;
+use nix::{
+    errno::Errno,
+    unistd::{Uid, User},
+};
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 use std::{
@@ -76,6 +80,8 @@ pub enum SybilError {
     KerberosCreds,
     #[snafu(display("Error while handling credentials storage"))]
     CredsStore,
+    #[snafu(display("Requested user not found"))]
+    UserNotFound,
 }
 
 #[tarpc::service]
@@ -120,9 +126,11 @@ impl Sybil for SybilServer {
     async fn new_creds(self, _: Context) -> Result<gss::Token, SybilError> {
         let id = &self.authorize(auth::Permissions::KINIT).await?;
 
-        let user = id.username().ok_or_else(|| {
-            tracing::warn!("request refused due to missing user");
-            SybilError::Unauthorized
+        tracing::info!(principal = %id.principal, "new credentials request");
+
+        let user = id.username(!config().ticket.fully_qualified_user).ok_or_else(|| {
+            tracing::warn!(principal = %id.principal, "could not find user for principal");
+            SybilError::UserNotFound
         })?;
         let realm = krb::default_realm().map_err(|error| {
             tracing::error!(%error, "could not retrieve default realm");
@@ -130,10 +138,10 @@ impl Sybil for SybilServer {
         })?;
 
         let target_user = krb::local_user(user).map_err(|error| {
-            tracing::error!(%error, principal = %format!("{user}@{realm}"), "could not retrieve local user for principal");
+            tracing::error!(%error, principal = %format!("{user}@{realm}"), "could not find user for principal");
             SybilError::KerberosCreds
         })?;
-        if user != target_user {
+        if target_user != id.username(false).unwrap() {
             tracing::error!(%user, %realm, "translation mismatch for user principal in realm");
             return Err(SybilError::KerberosCreds);
         }
@@ -151,9 +159,7 @@ impl Sybil for SybilServer {
             format!("{}/{realm}", krb::TGS_NAME)
         };
 
-        tracing::info!(%user, krbtgt = %princ, "new credentials request");
-
-        tracing::debug!("forging kerberos credentials");
+        tracing::debug!(%user, krbtgt = %princ, "forging kerberos credentials");
         let creds = krb::forge_credentials(
             user,
             &princ,
@@ -161,7 +167,7 @@ impl Sybil for SybilServer {
             &config().ticket.flags,
             None,
             Some(&config().ticket.lifetime),
-            Some(&config().ticket.renew_lifetime),
+            Some(&config().ticket.renewable_lifetime),
         )
         .map_err(|error| {
             tracing::error!(%error, %user, "could not forge credentials");
@@ -183,12 +189,12 @@ impl Sybil for SybilServer {
     async fn put_creds(self, _: Context) -> Result<(), SybilError> {
         let id = &self.authorize(auth::Permissions::WRITE).await?;
 
-        let user = id.username().ok_or_else(|| {
-            tracing::warn!("request refused due to missing user");
-            SybilError::Unauthorized
-        })?;
+        tracing::info!(principal = %id.principal, "put credentials request");
 
-        tracing::info!(%user, principal = %id.principal, "put credentials request");
+        let (uid, gid) = id.user.as_ref().map(|u| (u.uid, u.gid)).ok_or_else(|| {
+            tracing::warn!(principal = %id.principal, "could not find user for principal");
+            SybilError::UserNotFound
+        })?;
 
         tracing::debug!("retrieving delegated credentials");
         let gss = self.gss.lock().await;
@@ -197,14 +203,14 @@ impl Sybil for SybilServer {
             SybilError::GssDelegate
         })?;
 
-        let (uid, gid) = id.user.as_ref().map(|u| (u.uid, u.gid)).unwrap();
-        tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "storing delegated credentials");
+        // XXX: Should we enforce that the delegated credentials matches our principal?
 
+        tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "storing delegated credentials");
         thread::scope(|s| {
             let t = s.spawn(|| {
-                Errno::result(unsafe { libc::syscall(libc::SYS_setgid, gid) })
+                Errno::result(unsafe { libc::syscall(libc::SYS_setgid, gid.as_raw()) })
                     .map_err(|err| format!("setgid {gid} failed: {err}"))?;
-                Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid) })
+                Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid.as_raw()) })
                     .map_err(|err| format!("setuid {uid} failed: {err}"))?;
                 creds
                     .store(SYBIL_CREDS_STORE, true, false, CredUsage::Initiate, Some(MECH))

@@ -14,7 +14,7 @@ use std::{env, fmt, path::Path, sync::OnceLock};
 const DEFAULT_TKT_CIPHER: &str = "aes256-sha1";
 const DEFAULT_TKT_FLAGS: &str = "FR";
 const DEFAULT_TKT_LIFETIME: &str = "10h";
-const DEFAULT_TKT_RENEW_LIFETIME: &str = "7d";
+const DEFAULT_TKT_RENEWABLE_LIFETIME: &str = "7d";
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -44,7 +44,8 @@ pub struct Ticket {
     pub cipher: String,
     pub flags: String,
     pub lifetime: String,
-    pub renew_lifetime: String,
+    pub renewable_lifetime: String,
+    pub fully_qualified_user: bool,
     pub cross_realm: bool,
 }
 
@@ -52,7 +53,6 @@ pub struct Ticket {
 #[serde(default)]
 pub struct Policy {
     pub force_delegate: bool,
-    pub use_fully_qualified_username: bool,
 }
 
 #[derive(Default, Deserialize)]
@@ -69,8 +69,9 @@ impl Default for Ticket {
             cipher: DEFAULT_TKT_CIPHER.to_owned(),
             flags: DEFAULT_TKT_FLAGS.to_owned(),
             lifetime: DEFAULT_TKT_LIFETIME.to_owned(),
-            renew_lifetime: DEFAULT_TKT_RENEW_LIFETIME.to_owned(),
-            cross_realm: Default::default(),
+            renewable_lifetime: DEFAULT_TKT_RENEWABLE_LIFETIME.to_owned(),
+            fully_qualified_user: false,
+            cross_realm: false,
         }
     }
 }
@@ -123,14 +124,11 @@ pub fn config() -> &'static Config {
 
 pub fn print_server_config() {
     tracing::info!(
-        use_fully_qualified_username = %config().policy.use_fully_qualified_username,
-        "policy configuration"
-    );
-    tracing::info!(
         cipher = %config().ticket.cipher,
         flags = %config().ticket.flags,
         lifetime = %config().ticket.lifetime,
-        renew_lifetime = %config().ticket.renew_lifetime,
+        renewable_lifetime = %config().ticket.renewable_lifetime,
+        fully_qualified_user = %config().ticket.fully_qualified_user,
         cross_realm = %config().ticket.cross_realm,
         "ticket configuration"
     );

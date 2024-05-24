@@ -9,7 +9,7 @@ use crate::utils::*;
 
 use bitflags::bitflags;
 use netaddr2::Contains;
-use nix::unistd::{self, User};
+use nix::unistd::{self, Group, User};
 use std::{ffi::CString, fmt, net::IpAddr};
 
 bitflags! {
@@ -49,17 +49,15 @@ impl Identity {
         self.principal.rsplit_once('@').unzip().1
     }
 
-    pub fn username(&self) -> Option<&str> {
-        let realm = self.principal_realm();
+    pub fn username(&self, strip_realm: bool) -> Option<&str> {
+        let username = self.user.as_ref().map(|u| u.name.as_str());
 
-        if config().policy.use_fully_qualified_username || realm.is_none() {
-            self.user.as_ref().map(|u| u.name.as_str())
-        } else {
-            self.user.as_ref().map(|u| {
-                u.name
-                    .strip_suffix(&format!("@{}", realm.unwrap().to_lowercase()))
-                    .unwrap_or(u.name.as_str())
-            })
+        if !strip_realm {
+            return username;
+        }
+        match self.principal_realm() {
+            Some(realm) => username.map(|u| u.strip_suffix(&format!("@{}", realm.to_lowercase())).unwrap_or(u)),
+            None => username,
         }
     }
 }
@@ -75,7 +73,7 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
 
     let user = gss.source_username().map_or_else(
         |error| { tracing::debug!(%error, "could not retrieve source username"); None },
-        |username| match unistd::User::from_name(&username) {
+        |username| match User::from_name(&username) {
             Err(_) | Ok(None) => { tracing::debug!(%username, "could not lookup user"); None },
             Ok(user) => user,
         },
@@ -87,13 +85,14 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
             |groups| Some(
                 groups
                     .into_iter()
-                    .filter_map(|g| unistd::Group::from_gid(g).ok().flatten().map(|g| g.name))
+                    .filter_map(|g| Group::from_gid(g).ok().flatten().map(|g| g.name))
                     .collect(),
             ),
         )
     });
 
     let id = Identity { principal, user, groups };
+    let username = id.user.as_ref().map(|u| &u.name);
 
     for (r, rule) in config().acl.iter().enumerate() {
         if let conf::Acl{principal: None, user: None, group: None, hosts: None, permissions: _} = rule {
@@ -117,8 +116,8 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
             }
         }
         if let Some(regex) = &rule.user {
-            if regex.as_str().trim().is_empty() || id.username().map_or(true, |u| !regex.is_match(u)) {
-                tracing::debug!(rule = r, user = id.username().display(), "acl rule skipped due to user policy");
+            if regex.as_str().trim().is_empty() || username.map_or(true, |u| !regex.is_match(u)) {
+                tracing::debug!(rule = r, user = username.display(), "acl rule skipped due to user policy");
                 continue;
             }
         }
@@ -128,9 +127,9 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
                 continue;
             }
         }
-        tracing::debug!(principal = %id.principal, user = id.username().display(), "successfully authorized");
+        tracing::debug!(principal = %id.principal, user = username.display(), "successfully authorized");
         return Some(id);
     }
-    tracing::debug!(principal = %id.principal, user = id.username().display(), "permission denied");
+    tracing::debug!(principal = %id.principal, user = username.display(), "permission denied");
     None
 }

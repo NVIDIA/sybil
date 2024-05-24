@@ -6,10 +6,6 @@ force_delegate = false
 
 ########## Server configuration ##########
 
-[policy]
-# Keep usernames fully qualified and use enterprise principals in tickets
-use_fully_qualified_username = false
-
 [ticket]
 # Specify the encryption type used when forging new tickets
 cipher = "aes256-sha1"
@@ -18,7 +14,9 @@ flags = "FR"
 # Specify the lifetime used when forging new tickets
 lifetime = "10h"
 # Specify the renewable lifetime used when forging new tickets
-renew_lifetime = "7d"
+renewable_lifetime = "7d"
+# Use fully qualified usernames when forging tickets
+fully_qualified_user = false
 # Generate a cross-realm ticket instead of a regular one
 cross_realm = false
 
