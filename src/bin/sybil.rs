@@ -21,6 +21,7 @@ struct Arguments {
 enum Command {
     Kinit(KinitArguments),
     Store(StoreArguments),
+    Fetch(FetchArguments),
 }
 
 #[derive(FromArgs)]
@@ -39,6 +40,15 @@ struct KinitArguments {
 #[argh(subcommand, name = "store")]
 /// Delegate the current credentials to the remote Sybil server for storage.
 struct StoreArguments {}
+
+#[derive(FromArgs)]
+#[argh(subcommand, name = "fetch")]
+/// Fetch credentials from the remote Sybil server and store them in cache.
+struct FetchArguments {
+    /// UID to masquerade as
+    #[argh(option, short = 'u')]
+    uid: Option<u32>,
+}
 
 #[tokio::main(flavor = "current_thread")]
 #[snafu::report]
@@ -65,6 +75,11 @@ async fn main() -> Result<(), sybil::Error> {
             let mut client = sybil::new_client(main_args.host, None, false, true).await?;
             client.authenticate().await?;
             client.store().await?;
+        }
+        Command::Fetch(args) => {
+            let mut client = sybil::new_client(main_args.host, None, false, false).await?;
+            client.authenticate().await?;
+            client.fetch(args.uid).await?;
         }
     };
     Ok(())

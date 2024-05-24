@@ -15,6 +15,8 @@ flags = "FR"
 lifetime = "10h"
 # Specify the renewable lifetime used when forging new tickets
 renewable_lifetime = "7d"
+# Specify the minimum lifetime required when looking up tickets
+minimum_lifetime = "5m"
 # Use fully qualified usernames when forging tickets
 fully_qualified_user = false
 # Generate a cross-realm ticket instead of a regular one

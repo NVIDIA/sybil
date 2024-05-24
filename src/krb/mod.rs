@@ -229,6 +229,28 @@ pub fn forge_credentials(
     }
 }
 
+pub fn fetch_credentials(ccache: &str, min_life: Option<&str>) -> Result<Credentials, Error> {
+    let mut creds = Credentials(ptr::null_mut());
+    let ccache = CString::new(ccache)?;
+    let min_life = min_life.map(CString::new).transpose()?;
+
+    let ctx = context().lock().unwrap();
+
+    let ret = unsafe {
+        cffi::krbutil_fetch_creds(
+            ctx.0,
+            &mut creds.0,
+            ccache.as_ptr(),
+            min_life.as_deref().map_or(ptr::null(), CStr::as_ptr),
+        )
+    };
+    if ret == 0 {
+        Ok(creds)
+    } else {
+        Err(ret.into())
+    }
+}
+
 impl Credentials {
     pub fn local_user(&self) -> Result<String, Error> {
         let size = match unistd::sysconf(SysconfVar::LOGIN_NAME_MAX) {

@@ -89,6 +89,7 @@ trait Sybil {
     async fn gss_init(token: gss::Token) -> Result<Option<gss::Token>, SybilError>;
     async fn new_creds() -> Result<gss::Token, SybilError>;
     async fn put_creds() -> Result<(), SybilError>;
+    async fn get_creds(uid: Option<u32>) -> Result<gss::Token, SybilError>;
 }
 
 #[derive(Clone)]
@@ -213,7 +214,7 @@ impl Sybil for SybilServer {
                 Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid.as_raw()) })
                     .map_err(|err| format!("setuid {uid} failed: {err}"))?;
                 creds
-                    .store(SYBIL_CREDS_STORE, true, false, CredUsage::Initiate, Some(MECH))
+                    .store(SYBIL_CREDS_STORE, true, true, CredUsage::Initiate, Some(MECH))
                     .boxed()
             });
             t.join().unwrap().map_err(|error| {
@@ -221,6 +222,66 @@ impl Sybil for SybilServer {
                 SybilError::CredsStore
             })
         })
+    }
+
+    async fn get_creds(self, _: Context, uid: Option<u32>) -> Result<gss::Token, SybilError> {
+        if uid.is_some_and(|u| Uid::from_raw(u).is_root()) {
+            tracing::warn!("request refused due to masquerading as root");
+            return Err(SybilError::Unauthorized);
+        }
+        let perms = if uid.is_some() {
+            auth::Permissions::READ | auth::Permissions::MASQUERADE
+        } else {
+            auth::Permissions::READ
+        };
+        let id = &self.authorize(perms).await?;
+
+        tracing::info!(principal = %id.principal, uid = uid.display(), "get credentials request");
+
+        let (uid, gid) = match uid {
+            Some(uid) => match User::from_uid(uid.into()) {
+                Err(_) | Ok(None) => {
+                    tracing::debug!(uid, "could not lookup user");
+                    return Err(SybilError::UserNotFound);
+                }
+                Ok(Some(user)) => (user.uid, user.gid),
+            },
+            None => match &id.user {
+                None => {
+                    tracing::warn!(principal = %id.principal, "could not find user for principal");
+                    return Err(SybilError::UserNotFound);
+                }
+                Some(user) => (user.uid, user.gid),
+            },
+        };
+
+        tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "fetching kerberos credentials");
+        let creds = thread::scope(|s| {
+            let t = s.spawn(|| {
+                Errno::result(unsafe { libc::syscall(libc::SYS_setgid, gid.as_raw()) })
+                    .map_err(|err| format!("setgid {gid} failed: {err}"))?;
+                Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid.as_raw()) })
+                    .map_err(|err| format!("setuid {uid} failed: {err}"))?;
+                krb::fetch_credentials(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime)).boxed()
+            });
+            t.join().unwrap().map_err(|error| {
+                tracing::error!(%error, "could not fetch credentials");
+                SybilError::CredsStore
+            })
+        })?;
+
+        // XXX: Should we enforce that the fetched credentials matches our UID?
+
+        tracing::debug!("encrypting kerberos credentials");
+        self.gss
+            .lock()
+            .await
+            .wrap(true, &creds)
+            .map_err(|error| {
+                tracing::error!(%error, "could not encrypt credentials");
+                SybilError::GssEncrypt
+            })
+            .map(Into::into)
     }
 }
 
@@ -379,7 +440,7 @@ impl Client {
         let user = creds.local_user()?;
 
         tracing::info!("storing kerberos credentials");
-        let (ipc, mut proc) = privsep::spawn_user_process(&user)?;
+        let (ipc, mut proc) = privsep::spawn_user_process_from_name(&user)?;
         let req = async {
             let res = ipc.store_creds(context::current(), creds).await;
             drop(ipc);
@@ -396,6 +457,31 @@ impl Client {
         self.rpc.put_creds(context::current()).await??;
 
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn fetch(&mut self, uid: Option<u32>) -> Result<(), Error> {
+        tracing::info!("retrieving kerberos credentials");
+        let creds = self.rpc.get_creds(context::current(), uid).await??;
+
+        tracing::info!("decrypting kerberos credentials");
+        let creds: krb::Credentials = self
+            .gss
+            .unwrap(&creds)
+            .map_err(Into::<gss::Error>::into)?
+            .deref()
+            .try_into()?;
+
+        tracing::info!("storing kerberos credentials");
+        let (ipc, mut proc) = privsep::spawn_user_process_from_uid(uid.map_or_else(Uid::effective, Into::into))?;
+        let req = async {
+            let res = ipc.store_creds(context::current(), creds).await;
+            drop(ipc);
+            res
+        };
+        let (resp, _) = join!(req, proc.wait());
+
+        Ok(resp.context(privsep::IpcRequest)??)
     }
 }
 

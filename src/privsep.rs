@@ -6,7 +6,10 @@
 use crate::krb;
 
 use futures::prelude::*;
-use nix::{errno::Errno, unistd};
+use nix::{
+    errno::Errno,
+    unistd::{Uid, User},
+};
 use snafu::prelude::*;
 use std::{
     env, io,
@@ -61,26 +64,38 @@ impl PrivSep for UserProcess {
     }
 }
 
-pub fn spawn_user_process(user: &str) -> Result<(PrivSepClient, PrivSepChild), Error> {
-    let (uid, gid) = unistd::User::from_name(user)
+pub fn spawn_user_process_from_name(user: &str) -> Result<(PrivSepClient, PrivSepChild), Error> {
+    let user = User::from_name(user)
         .context(LookupUser)?
-        .context(UserNotFound { user })
-        .map(|u| (u.uid, u.gid))?;
+        .context(UserNotFound { user })?;
+
+    spawn_user_process(&user)
+}
+
+pub fn spawn_user_process_from_uid(uid: Uid) -> Result<(PrivSepClient, PrivSepChild), Error> {
+    let user = User::from_uid(uid)
+        .context(LookupUser)?
+        .context(UserNotFound { user: uid.to_string() })?;
+
+    spawn_user_process(&user)
+}
+
+pub fn spawn_user_process(user: &User) -> Result<(PrivSepClient, PrivSepChild), Error> {
     let env: Vec<(String, String)> = env::vars()
         .filter(|(v, _)| v == "RUST_LOG" || v == "KRB5_TRACE")
         .collect();
 
-    tracing::debug!(%user, "spawning user process");
+    tracing::debug!(user = %user.name, "spawning user process");
     let (stream, ustream) = UnixStream::pair()?;
     let stdin = unsafe { Stdio::from_raw_fd(stream.as_raw_fd()) };
     let mut cmd = Command::new(env::current_exe()?);
     cmd.env_clear()
         .envs(env)
-        .env(PRIVSEP, user)
+        .env(PRIVSEP, &user.name)
         .current_dir("/")
         .stdin(stdin)
-        .uid(uid.into())
-        .gid(gid.into());
+        .uid(user.uid.into())
+        .gid(user.gid.into());
 
     let proc = unsafe {
         cmd.pre_exec(|| {

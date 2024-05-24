@@ -375,3 +375,116 @@ out_creds:
 out_auth:
         return (ret);
 }
+
+static krb5_error_code fetch_cross_realm_tgt(krb5_context ctx,
+                                             krb5_creds **cr_creds,
+                                             const char *realm,
+                                             const krb5_ccache ccache,
+                                             const krb5_creds *tgt,
+                                             const char *min_life)
+{
+        krb5_error_code ret;
+        krb5_principal serv;
+        krb5_creds creds;
+        krb5_flags flags = (tgt->ticket_flags & KDC_TKT_COMMON_MASK) | KDC_OPT_FORWARDED | KDC_OPT_CANONICALIZE;
+
+        ret = krb5_build_principal(ctx, &serv, tgt->client->realm.length, tgt->client->realm.data,
+                                   KRB5_TGS_NAME, realm, NULL);
+        goto_out(ret, serv);
+
+        krb5_creds query = {
+                .magic = KV5M_CREDS,
+                .client = tgt->client,
+                .server = serv,
+        };
+        ret = set_ticket_times(ctx, NULL, min_life, min_life, &query.times);
+        goto_out(ret, creds);
+        ret = krb5_cc_retrieve_cred(ctx, ccache, KRB5_TC_MATCH_TIMES, &query, &creds);
+        switch (ret) {
+        case 0:
+                ret = krb5_copy_creds(ctx, &creds, cr_creds);
+                break;
+        case KRB5_CC_NOTFOUND:
+                memset(&query.times, 0, sizeof(query.times));
+                ret = krb5_get_cred_via_tkt(ctx, (krb5_creds *)tgt, flags, NULL, &query, cr_creds);
+                goto_out(ret, creds);
+                krb5_cc_store_cred(ctx, ccache, *cr_creds);
+                __attribute__((fallthrough));
+        default:
+                goto out_creds;
+        };
+
+        explicit_bzero(creds.ticket.data, creds.ticket.length);
+        explicit_bzero(creds.keyblock.contents, creds.keyblock.length);
+        krb5_free_cred_contents(ctx, &creds);
+out_creds:
+        krb5_free_principal(ctx, serv);
+out_serv:
+        return (ret);
+}
+
+krb5_error_code krbutil_fetch_creds(krb5_context ctx, krb5_data **cred_data, const char *ccname, const char *min_life)
+{
+        krb5_error_code ret;
+        krb5_ccache ccache;
+        krb5_auth_context auth;
+        krb5_principal clnt, serv;
+        krb5_creds creds, *cr_creds = NULL;
+        char *realm;
+
+        if (*ccname == '\0')
+                return (KRB5_CC_BADNAME);
+
+        ret = krb5_get_default_realm(ctx, &realm);
+        goto_out(ret, realm);
+        ret = krb5_cc_resolve(ctx, ccname, &ccache);
+        goto_out(ret, ccache);
+        ret = krb5_cc_get_principal(ctx, ccache, &clnt);
+        goto_out(ret, clnt);
+        ret = krb5_build_principal_ext(ctx, &serv, clnt->realm.length, clnt->realm.data,
+                                       KRB5_TGS_NAME_SIZE, KRB5_TGS_NAME,
+                                       clnt->realm.length, clnt->realm.data, NULL);
+        goto_out(ret, serv);
+
+        krb5_creds query = {
+                .magic = KV5M_CREDS,
+                .client = clnt,
+                .server = serv,
+        };
+        ret = set_ticket_times(ctx, NULL, min_life, min_life, &query.times);
+        goto_out(ret, creds);
+        ret = krb5_cc_retrieve_cred(ctx, ccache, KRB5_TC_MATCH_TIMES, &query, &creds);
+        goto_out(ret, creds);
+
+        if (strncmp(realm, clnt->realm.data, clnt->realm.length)) {
+                ret = fetch_cross_realm_tgt(ctx, &cr_creds, realm, ccache, &creds, min_life);
+                goto_out(ret, cr_creds);
+        }
+
+        ret = krb5_auth_con_init(ctx, &auth);
+        goto_out(ret, auth);
+        krb5_auth_con_setflags(ctx, auth, 0);
+        ret = krb5_mk_ncred(ctx, auth, (krb5_creds *[]){&creds, cr_creds, NULL}, cred_data, NULL);
+
+        krb5_auth_con_free(ctx, auth);
+out_auth:
+        if (cr_creds != NULL) {
+                explicit_bzero(cr_creds->ticket.data, cr_creds->ticket.length);
+                explicit_bzero(cr_creds->keyblock.contents, cr_creds->keyblock.length);
+                krb5_free_creds(ctx, cr_creds);
+        }
+out_cr_creds:
+        explicit_bzero(creds.ticket.data, creds.ticket.length);
+        explicit_bzero(creds.keyblock.contents, creds.keyblock.length);
+        krb5_free_cred_contents(ctx, &creds);
+out_creds:
+        krb5_free_principal(ctx, serv);
+out_serv:
+        krb5_free_principal(ctx, clnt);
+out_clnt:
+        krb5_cc_close(ctx, ccache);
+out_ccache:
+        krb5_free_default_realm(ctx, realm);
+out_realm:
+        return (ret);
+}

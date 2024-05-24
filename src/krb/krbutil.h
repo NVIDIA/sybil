@@ -6,6 +6,7 @@
 #include <krb5/krb5.h>
 extern krb5_error_code krb5_encrypt_tkt_part(krb5_context, const krb5_keyblock *, krb5_ticket *);
 extern krb5_error_code encode_krb5_ticket(const krb5_ticket *, krb5_data **);
+extern krb5_error_code krb5_get_cred_via_tkt(krb5_context, krb5_creds *, krb5_flags, krb5_address * const *, krb5_creds *, krb5_creds **);
 
 krb5_error_code krbutil_init(void);
 void krbutil_fini(void);
@@ -16,3 +17,4 @@ krb5_error_code krbutil_forge_creds(krb5_context, krb5_data **, const char *, co
 krb5_error_code krbutil_local_user(krb5_context, char *, size_t, const char *)  __attribute__((nonnull(2,4)));
 krb5_error_code krbutil_local_user_creds(krb5_context, char *, size_t, const krb5_data *)  __attribute__((nonnull(2,4)));
 krb5_error_code krbutil_store_creds(krb5_context, const krb5_data *) __attribute__((nonnull(2)));
+krb5_error_code krbutil_fetch_creds(krb5_context, krb5_data **, const char *, const char *) __attribute__((nonnull(3)));
