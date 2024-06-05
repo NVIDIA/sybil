@@ -143,8 +143,8 @@ pub async fn serve_user_process() -> Result<(), Error> {
 
     BaseChannel::with_defaults(transport)
         .execute(UserProcess.serve())
-        .for_each(|r| {
-            tokio::spawn(r).unwrap_or_else(|error| tracing::error!(%error, "could not execute task to completion"))
+        .for_each(|r| async {
+            tokio::spawn(r);
         })
         .await;
     tracing::debug!("stopping user process");

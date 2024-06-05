@@ -349,9 +349,8 @@ pub async fn new_server(
                 }
             };
             c.execute(srv.serve())
-                .for_each(|r| {
-                    tokio::spawn(r.instrument(span.clone()))
-                        .unwrap_or_else(|error| tracing::error!(%error, "could not execute task to completion"))
+                .for_each(|r| async {
+                    tokio::spawn(r.instrument(span.clone()));
                 })
                 .await;
         })
