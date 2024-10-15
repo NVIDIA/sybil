@@ -11,6 +11,7 @@ fn main() {
     let out_dir = env::var("OUT_DIR").map(PathBuf::from).unwrap();
 
     println!("cargo:rerun-if-changed=src/krb");
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
 
     let bindings = bindgen::Builder::default()
         .header("src/krb/krbutil.h")
@@ -46,13 +47,41 @@ fn main() {
         .flag("-D_DEFAULT_SOURCE")
         .flag("-D_FORTIFY_SOURCE=2")
         .flag("-fstack-protector")
-        .define("KADMIN_PRINCIPAL", SYBIL_ADMIN_PRINCIPAL)
-        .compile("krbutil");
+        .define("KRBUTIL_CLIENT", "1")
+        .cargo_metadata(false)
+        .compile("krbutil_clnt");
 
-    for (bin, sym) in [("sybil", "krbutil_init_krb5"), ("sybild", "krbutil_init_kadm5")] {
-        println!("cargo:rustc-link-arg-bin={bin}=-Wl,--defsym=krbutil_init={sym}");
+    for flag in [
+        "-Wl,-Bstatic",
+        "-lkrbutil_clnt",
+        "-Wl,-Bdynamic",
+        "-lkrb5",
+        "-lk5crypto",
+    ] {
+        println!("cargo:rustc-link-arg-bin=sybil={}", flag);
     }
-    for lib in ["krb5", "kadm5srv", "k5crypto", "krb5support"] {
-        println!("cargo:rustc-link-lib={lib}");
+
+    cc::Build::new()
+        .file("src/krb/krbutil.c")
+        .warnings(true)
+        .extra_warnings(true)
+        .flag("-std=c99")
+        .flag("-D_DEFAULT_SOURCE")
+        .flag("-D_FORTIFY_SOURCE=2")
+        .flag("-fstack-protector")
+        .define("KRBUTIL_SERVER", "1")
+        .define("KADMIN_PRINCIPAL", SYBIL_ADMIN_PRINCIPAL)
+        .cargo_metadata(false)
+        .compile("krbutil_serv");
+
+    for flag in [
+        "-Wl,-Bstatic",
+        "-lkrbutil_serv",
+        "-Wl,-Bdynamic",
+        "-lkrb5",
+        "-lk5crypto",
+        "-lkadm5srv",
+    ] {
+        println!("cargo:rustc-link-arg-bin=sybild={}", flag);
     }
 }

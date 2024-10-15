@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <errno.h>
 #include <grp.h>
+#include <pthread.h>
 #include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -18,63 +18,54 @@
 #define string(x) #x
 #define goto_out(ret, ...) if (ret) goto out##__VA_OPT__(_)##__VA_ARGS__
 
-static krb5_context context = NULL;
 static void *kadmin = NULL;
+static pthread_mutex_t kadmin_lock = PTHREAD_MUTEX_INITIALIZER;
 
-__attribute__((constructor))
-static void krbutil_ctor(void)
+#ifdef KRBUTIL_SERVER
+
+krb5_context krbutil_context(void)
 {
-        krb5_error_code ret;
+        krb5_context ctx;
 
-        if ((ret = krbutil_init())) {
-                const char *errmsg = krb5_get_error_message(context, ret);
-                fprintf(stderr, "%s\n", context ? errmsg : "Could not initialize krb5 context");
-                krb5_free_error_message(context, errmsg);
-                exit(1);
-        }
+        return (kadm5_init_krb5_context(&ctx) ? NULL : ctx);
+}
+
+static krb5_error_code kadmin_init_lazy(void)
+{
+        krb5_context ctx;
+        kadm5_ret_t ret;
+
+        if (kadmin != NULL)
+                return (0);
+
+        ctx = krbutil_context();
+        ret = kadm5_init(ctx, string(KADMIN_PRINCIPAL), NULL, NULL, NULL,
+                         KADM5_STRUCT_VERSION, KADM5_API_VERSION_4, NULL, &kadmin);
+        return (ret);
 }
 
 __attribute__((destructor))
-static void krbutil_dtor(void)
+static void kadmin_fini(void)
 {
-        krbutil_fini();
-}
-
-krb5_error_code krbutil_init_krb5(void)
-{
-        return (krb5_init_context(&context));
-}
-
-krb5_error_code krbutil_init_kadm5(void)
-{
-        kadm5_ret_t ret;
-        char *realm;
-
-        ret = kadm5_init_krb5_context(&context);
-        goto_out(ret);
-        ret = krb5_get_default_realm(context, &realm);
-        goto_out(ret);
-        ret = kadm5_init(context, string(KADMIN_PRINCIPAL), NULL, NULL,
-                         &(kadm5_config_params){.mask = KADM5_CONFIG_REALM, .realm = realm},
-                         KADM5_STRUCT_VERSION, KADM5_API_VERSION_4, NULL, &kadmin);
-
-        krb5_free_default_realm(context, realm);
-out:
-        return (krb5_error_code)(ret);
-}
-
-void krbutil_fini(void)
-{
-        if (context != NULL)
-                krb5_free_context(context);
         if (kadmin != NULL)
                 kadm5_destroy(kadmin);
 }
 
+#elif KRBUTIL_CLIENT
+
 krb5_context krbutil_context(void)
 {
-        return (context);
+        krb5_context ctx;
+
+        return (krb5_init_context(&ctx) ? NULL : ctx);
 }
+
+static krb5_error_code kadmin_init_lazy(void)
+{
+        return (KRB5KDC_ERR_NONE);
+}
+
+#endif
 
 static krb5_error_code set_ticket_flags(const char *str,
                                         krb5_flags *flags)
@@ -163,7 +154,10 @@ static krb5_error_code encrypt_ticket(krb5_context ctx,
         kadm5_key_data *keys;
         int i, nkeys;
 
-        ret = kadm5_get_principal_keys(kadmin, serv, 0, &keys, &nkeys);
+        pthread_mutex_lock(&kadmin_lock);
+        if ((ret = kadmin_init_lazy()) == 0) // XXX: Prevent leak by initializing kadm5 once.
+                ret = kadm5_get_principal_keys(kadmin, serv, 0, &keys, &nkeys);
+        pthread_mutex_unlock(&kadmin_lock);
         goto_out(ret, keys);
 
         for (i = 0; i < nkeys && enc != keys[i].key.enctype; ++i);
