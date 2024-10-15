@@ -27,7 +27,7 @@ futures = "0.3.30"
 libc = "0.2.155"
 libgssapi = { version = "0.7.1", features = ["s4u"] }
 netaddr2 = { version = "0.10.0", features = ["serde"] }
-nix = { version = "0.29.0", features = ["user", "fs"] }
+nix = { version = "0.29.0", features = ["user", "fs", "process", "signal"] }
 rand = "0.8.5"
 regex-lite = "0.1.5"
 serde = { version = "1.0.203", features = ["derive"] }
@@ -35,7 +35,8 @@ serde_with = "3.8.1"
 snafu = "0.8.3"
 stubborn-io = "0.3.5"
 tarpc = { version = "0.34.0", features = ["serde-transport", "serde-transport-bincode", "tcp"] }
-tokio = { version = "1.37.0", features = ["sync", "net", "rt-multi-thread", "process", "macros"] }
+tokio = { version = "1.37.0", features = ["sync", "net", "rt-multi-thread", "process", "macros", "signal"] }
+tokio-util = { version = "0.7.11", features = ["rt"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 trust-dns-resolver = "0.23.2"

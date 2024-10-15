@@ -40,7 +40,12 @@ use tarpc::{
     server::{BaseChannel, Channel},
     tokio_serde::formats::Bincode,
 };
-use tokio::{net::ToSocketAddrs, sync::Mutex};
+use tokio::{
+    net::ToSocketAddrs,
+    signal::unix::{signal, SignalKind},
+    sync::Mutex,
+};
+use tokio_util::task::TaskTracker;
 use tracing::Instrument;
 
 const SYBIL_PORT: u16 = 57811;
@@ -102,6 +107,7 @@ struct SybilServer {
 
 pub struct Server<S: Future> {
     rpc: S,
+    tasks: TaskTracker,
 }
 
 pub struct Client {
@@ -298,6 +304,22 @@ impl SybilServer {
     }
 }
 
+fn new_service(peer: IpAddr) -> Option<(SybilServer, tracing::Span)> {
+    let span = tracing::info_span!("sybil_service", %peer).entered();
+
+    let srv = match gss::new_server_ctx(SYBIL_SERVICE) {
+        Ok(gss) => SybilServer {
+            peer,
+            gss: Arc::new(Mutex::new(gss)),
+        },
+        Err(error) => {
+            tracing::error!(%error, "could not initialize GSS context");
+            return None;
+        }
+    };
+    Some((srv, span.exit()))
+}
+
 pub async fn new_server(
     addrs: Option<impl ToSocketAddrs + Display>,
     max_conn: usize,
@@ -316,6 +338,9 @@ pub async fn new_server(
         }
     };
 
+    let tasks = TaskTracker::new();
+    let rt = tasks.clone();
+
     let rpc = transport
         .filter_map(|t| async {
             t.map_or_else(
@@ -327,39 +352,32 @@ pub async fn new_server(
             )
         })
         .map(BaseChannel::with_defaults)
-        .map(|c| async {
-            let peer = match c.transport().peer_addr() {
-                Ok(addr) => addr.ip(),
-                Err(error) => {
-                    tracing::error!(%error, "could not retrieve peer address");
-                    return;
-                }
-            };
+        .map(move |c| {
+            let rt = rt.clone();
 
-            let span = tracing::info_span!("sybil_service", %peer);
-            let srv = {
-                let _enter = span.enter();
-                match gss::new_server_ctx(SYBIL_SERVICE) {
-                    Ok(gss) => SybilServer {
-                        peer,
-                        gss: Arc::new(Mutex::new(gss)),
-                    },
+            async move {
+                let peer = match c.transport().peer_addr() {
+                    Ok(addr) => addr.ip(),
                     Err(error) => {
-                        tracing::error!(%error, "could not initialize GSS context");
+                        tracing::error!(%error, "could not retrieve peer address");
                         return;
                     }
+                };
+                let Some((srv, span)) = new_service(peer) else {
+                    return;
+                };
+
+                let stream = c.execute(srv.serve());
+                tokio::pin!(stream);
+                while let Some(req) = stream.next().await {
+                    rt.spawn(req.instrument(span.clone()));
                 }
-            };
-            c.execute(srv.serve())
-                .for_each(|r| async {
-                    tokio::spawn(r.instrument(span.clone()));
-                })
-                .await;
+            }
         })
         .buffer_unordered(max_conn)
         .collect::<()>();
 
-    Ok(Server { rpc })
+    Ok(Server { rpc, tasks })
 }
 
 pub async fn new_client(
@@ -399,7 +417,28 @@ pub async fn new_client(
 
 impl<S: Future> Server<S> {
     pub async fn run(self) {
-        self.rpc.await;
+        let mut sigint = match signal(SignalKind::interrupt()) {
+            Err(error) => {
+                tracing::error!(%error, "could not setup SIGINT handler");
+                return;
+            }
+            Ok(sig) => sig,
+        };
+        let mut sigterm = match signal(SignalKind::terminate()) {
+            Err(error) => {
+                tracing::error!(%error, "could not setup SIGTERM handler");
+                return;
+            }
+            Ok(sig) => sig,
+        };
+
+        tokio::select! {
+            _ = self.rpc => return,
+            _ = sigint.recv() => (),
+            _ = sigterm.recv() => (),
+        };
+        self.tasks.close();
+        self.tasks.wait().await;
     }
 }
 

@@ -1397,6 +1397,7 @@ dependencies = [
  "stubborn-io",
  "tarpc",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "trust-dns-resolver",
