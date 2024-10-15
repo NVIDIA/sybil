@@ -3,12 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::conf::config;
 use crate::krb;
 
 use futures::prelude::*;
 use nix::{
     errno::Errno,
-    unistd::{Uid, User},
+    sys::{
+        prctl,
+        signal::{self, Signal},
+    },
+    unistd::{Pid, Uid, User},
 };
 use snafu::prelude::*;
 use std::{
@@ -27,9 +32,13 @@ use tarpc::{
 use tokio::{
     net::UnixStream,
     process::{Child, Command},
+    time::{self, Duration, Instant},
 };
+use tokio_util::task::TaskTracker;
 
-pub const PRIVSEP: &str = "SYBIL_PRIVSEP_USER";
+pub const PRIVSEP_USER: &str = "SYBIL_PRIVSEP_USER";
+pub const PRIVSEP_HOST: &str = "SYBIL_PRIVSEP_HOST";
+pub const PRIVSEP_SYSLOG: &str = "SYBIL_PRIVSEP_SYSLOG";
 
 #[derive(Debug, Snafu)]
 #[snafu(context(suffix(false)))]
@@ -52,58 +61,96 @@ pub enum Error {
 #[tarpc::service]
 pub trait PrivSep {
     async fn store_creds(creds: krb::Credentials) -> Result<(), krb::Error>;
+    async fn renew_creds(lifetime: Duration);
 }
 
 #[derive(Clone)]
-struct UserProcess;
+struct UserProcess {
+    tasks: TaskTracker,
+}
 
 impl PrivSep for UserProcess {
     async fn store_creds(self, _: context::Context, creds: krb::Credentials) -> Result<(), krb::Error> {
-        tracing::debug!("storing kerberos credentials");
         creds.store()
+    }
+
+    async fn renew_creds(self, _: context::Context, lifetime: Duration) {
+        self.tasks.spawn(async move {
+            let halflife = |l| Instant::now() + l / 2;
+            let mut timer = time::interval_at(halflife(lifetime), lifetime / 10);
+            let mut ticks = 0;
+
+            while ticks < 5 {
+                timer.tick().await;
+                ticks += 1;
+
+                match crate::new_client(env::var(PRIVSEP_HOST).ok(), None, false, false)
+                    .and_then(|mut c| async move {
+                        c.authenticate().await?;
+                        c.fetch(None).await
+                    })
+                    .await
+                {
+                    Ok(lifetime) => {
+                        timer.reset_at(halflife(lifetime));
+                        ticks = 0
+                    }
+                    Err(error) => tracing::error!(%error, "could not renew kerberos credentials"),
+                };
+            }
+            tracing::error!("maximum retries exhausted, exiting");
+        });
     }
 }
 
-pub fn spawn_user_process_from_name(user: &str) -> Result<(PrivSepClient, PrivSepChild), Error> {
+pub fn spawn_user_process_from_name(user: &str, syslog: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
     let user = User::from_name(user)
         .context(LookupUser)?
         .context(UserNotFound { user })?;
 
-    spawn_user_process(&user)
+    spawn_user_process(&user, syslog)
 }
 
-pub fn spawn_user_process_from_uid(uid: Uid) -> Result<(PrivSepClient, PrivSepChild), Error> {
+pub fn spawn_user_process_from_uid(uid: Uid, syslog: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
     let user = User::from_uid(uid)
         .context(LookupUser)?
         .context(UserNotFound { user: uid.to_string() })?;
 
-    spawn_user_process(&user)
+    spawn_user_process(&user, syslog)
 }
 
-pub fn spawn_user_process(user: &User) -> Result<(PrivSepClient, PrivSepChild), Error> {
+pub fn spawn_user_process(user: &User, syslog: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
+    let ppid = Pid::this();
     let env: Vec<(String, String)> = env::vars()
-        .filter(|(v, _)| v == "RUST_LOG" || v == "KRB5_TRACE")
+        .filter(|(v, _)| v == "RUST_LOG" || v == "KRB5_TRACE" || v.starts_with("SYBIL_"))
         .collect();
 
     tracing::debug!(user = %user.name, "spawning user process");
     let (stream, ustream) = UnixStream::pair()?;
     let stdin = unsafe { Stdio::from_raw_fd(stream.as_raw_fd()) };
-    let mut cmd = Command::new(env::current_exe()?);
+    let mut cmd = Command::new(&config().binary_path);
     cmd.env_clear()
         .envs(env)
-        .env(PRIVSEP, &user.name)
+        .env(PRIVSEP_USER, &user.name)
         .current_dir("/")
         .stdin(stdin)
         .uid(user.uid.into())
         .gid(user.gid.into());
 
+    if syslog {
+        cmd.env(PRIVSEP_SYSLOG, "true");
+    }
+
     let proc = unsafe {
-        cmd.pre_exec(|| {
+        cmd.pre_exec(move || {
+            prctl::set_pdeathsig(Signal::SIGTERM)?;
+            if Pid::parent() != ppid {
+                signal::kill(Pid::this(), Signal::SIGTERM)?;
+            }
             close_fds::set_fds_cloexec(3, &[]);
             Ok(())
         })
     }
-    .kill_on_drop(true)
     .spawn()?;
 
     let transport = Transport::from((ustream, Bincode::default()));
@@ -128,9 +175,13 @@ impl PrivSepChild {
             _ => (),
         };
     }
+
+    pub fn pid(&self) -> Option<Pid> {
+        self.0.id().map(|i| Pid::from_raw(i as libc::pid_t))
+    }
 }
 
-#[tracing::instrument(fields(user = env::var(PRIVSEP).unwrap()))]
+#[tracing::instrument(fields(user = env::var(PRIVSEP_USER).unwrap()))]
 pub async fn serve_user_process() -> Result<(), Error> {
     tracing::debug!("serving user process");
     let stdin = unsafe { StdUnixStream::from_raw_fd(io::stdin().as_raw_fd()) };
@@ -140,13 +191,19 @@ pub async fn serve_user_process() -> Result<(), Error> {
             tracing::error!(%error, "could not retrieve stream from stdin");
             ServeProcess
         })?;
+    let proc = UserProcess {
+        tasks: TaskTracker::new(),
+    };
 
     BaseChannel::with_defaults(transport)
-        .execute(UserProcess.serve())
-        .for_each(|r| async {
-            tokio::spawn(r);
-        })
+        .execute(proc.clone().serve())
+        .buffered(1)
+        .collect::<()>()
         .await;
+
+    proc.tasks.close();
+    proc.tasks.wait().await;
+
     tracing::debug!("stopping user process");
     Ok(())
 }

@@ -18,6 +18,7 @@ use std::{
     slice,
     str::Utf8Error,
     sync::{Mutex, OnceLock},
+    time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH},
 };
 
 mod cffi {
@@ -90,6 +91,12 @@ impl From<IntoStringError> for Error {
 impl From<Utf8Error> for Error {
     fn from(_: Utf8Error) -> Self {
         Self(cffi::KRB5_ERR_INVALID_UTF8)
+    }
+}
+
+impl From<SystemTimeError> for Error {
+    fn from(_: SystemTimeError) -> Self {
+        Self(cffi::KRB5KRB_AP_ERR_TKT_EXPIRED)
     }
 }
 
@@ -266,6 +273,19 @@ impl Credentials {
         if ret == 0 {
             unsafe { user.set_len(size) };
             Ok(CStr::from_bytes_until_nul(&user)?.to_owned().into_string()?)
+        } else {
+            Err(ret.into())
+        }
+    }
+
+    pub fn lifetime(&self) -> Result<SystemTime, Error> {
+        let mut lifetime: libc::time_t = 0;
+        let ctx = context().lock().unwrap();
+
+        assert!(!self.0.is_null());
+        let ret = unsafe { cffi::krbutil_lifetime_creds(ctx.0, &mut lifetime, self.0) };
+        if ret == 0 {
+            Ok(UNIX_EPOCH + Duration::from_secs(lifetime as u64))
         } else {
             Err(ret.into())
         }

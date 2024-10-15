@@ -4,6 +4,8 @@
  */
 
 use argh::FromArgs;
+use std::ffi::CStr;
+use syslog_tracing::Syslog;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[derive(FromArgs)]
@@ -48,21 +50,44 @@ struct FetchArguments {
     /// UID to masquerade as
     #[argh(option, short = 'u')]
     uid: Option<u32>,
+    /// renew credentials indefinitely
+    #[argh(switch, short = 'R')]
+    renew: bool,
+    /// detach the renewing process
+    #[argh(switch, short = 'd')]
+    detach: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
 #[snafu::report]
 async fn main() -> Result<(), sybil::Error> {
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
+    if std::env::var(sybil::PRIVSEP_SYSLOG).is_ok() {
+        let syslog = Syslog::new(
+            CStr::from_bytes_with_nul(b"sybil\0").unwrap(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
 
-    if std::env::var(sybil::PRIVSEP).is_ok() {
+        tracing_subscriber::registry()
+            .with(fmt::layer().with_writer(syslog))
+            .with(EnvFilter::from_default_env())
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(fmt::layer())
+            .with(EnvFilter::from_default_env())
+            .init();
+    }
+
+    if std::env::var(sybil::PRIVSEP_USER).is_ok() {
         return sybil::do_privilege_separation().await;
     }
 
     let main_args: Arguments = argh::from_env();
+    if let Some(host) = &main_args.host {
+        std::env::set_var(sybil::PRIVSEP_HOST, host);
+    }
 
     match main_args.command {
         Command::Kinit(args) => {
@@ -79,7 +104,11 @@ async fn main() -> Result<(), sybil::Error> {
         Command::Fetch(args) => {
             let mut client = sybil::new_client(main_args.host, None, false, false).await?;
             client.authenticate().await?;
-            client.fetch(args.uid).await?;
+            if args.renew {
+                client.fetch_and_renew(args.uid, args.detach).await?;
+            } else {
+                client.fetch(args.uid).await?;
+            }
         }
     };
     Ok(())

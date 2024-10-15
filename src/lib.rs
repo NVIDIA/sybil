@@ -13,13 +13,13 @@ mod utils;
 
 use crate::conf::config;
 use crate::gss::{CredUsage, SecurityContext, MECH};
-pub use crate::privsep::PRIVSEP;
+pub use crate::privsep::{PRIVSEP_HOST, PRIVSEP_SYSLOG, PRIVSEP_USER};
 use crate::utils::*;
 
-use futures::{join, prelude::*};
+use futures::prelude::*;
 use nix::{
     errno::Errno,
-    unistd::{Uid, User},
+    unistd::{Pid, Uid, User},
 };
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
@@ -488,15 +488,16 @@ impl Client {
         let user = creds.local_user()?;
 
         tracing::info!("storing kerberos credentials");
-        let (ipc, mut proc) = privsep::spawn_user_process_from_name(&user)?;
+        let (ipc, mut proc) = privsep::spawn_user_process_from_name(&user, false)?;
         let req = async {
-            let res = ipc.store_creds(context::current(), creds).await;
+            let resp = ipc.store_creds(context::current(), creds).await;
             drop(ipc);
-            res
+            resp.context(privsep::IpcRequest)
         };
-        let (resp, _) = join!(req, proc.wait());
+        let (resp, _) = tokio::join!(req, proc.wait());
+        resp??;
 
-        Ok(resp.context(privsep::IpcRequest)??)
+        Ok(())
     }
 
     #[tracing::instrument(skip_all)]
@@ -508,7 +509,7 @@ impl Client {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn fetch(&mut self, uid: Option<u32>) -> Result<(), Error> {
+    pub async fn fetch(&mut self, uid: Option<u32>) -> Result<Duration, Error> {
         tracing::info!("retrieving kerberos credentials");
         let creds = self.rpc.get_creds(context::current(), uid).await??;
 
@@ -519,20 +520,63 @@ impl Client {
             .map_err(Into::<gss::Error>::into)?
             .deref()
             .try_into()?;
+        let lifetime = creds
+            .lifetime()?
+            .duration_since(SystemTime::now())
+            .map_err(Into::<krb::Error>::into)?;
 
         tracing::info!("storing kerberos credentials");
-        let (ipc, mut proc) = privsep::spawn_user_process_from_uid(uid.map_or_else(Uid::effective, Into::into))?;
-        let req = async {
-            let res = ipc.store_creds(context::current(), creds).await;
-            drop(ipc);
-            res
+        match uid.map(Into::into) {
+            Some(uid) if uid != Uid::effective() => {
+                let (ipc, mut proc) = privsep::spawn_user_process_from_uid(uid, false)?;
+                let req = async {
+                    let resp = ipc.store_creds(context::current(), creds).await;
+                    drop(ipc);
+                    resp.context(privsep::IpcRequest)
+                };
+                let (resp, _) = tokio::join!(req, proc.wait());
+                resp??;
+            }
+            _ => creds.store()?,
         };
-        let (resp, _) = join!(req, proc.wait());
 
-        Ok(resp.context(privsep::IpcRequest)??)
+        Ok(lifetime)
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn fetch_and_renew(&mut self, uid: Option<u32>, detach: bool) -> Result<Option<Pid>, Error> {
+        tracing::info!("retrieving kerberos credentials");
+        let creds = self.rpc.get_creds(context::current(), uid).await??;
+
+        tracing::info!("decrypting kerberos credentials");
+        let creds: krb::Credentials = self
+            .gss
+            .unwrap(&creds)
+            .map_err(Into::<gss::Error>::into)?
+            .deref()
+            .try_into()?;
+        let lifetime = creds
+            .lifetime()?
+            .duration_since(SystemTime::now())
+            .map_err(Into::<krb::Error>::into)?;
+
+        tracing::info!("storing kerberos credentials");
+        let (ipc, mut proc) =
+            privsep::spawn_user_process_from_uid(uid.map_or_else(Uid::effective, Into::into), detach)?;
+        ipc.store_creds(context::current(), creds).await??;
+        tracing::info!("starting renewing kerberos credentials");
+        ipc.renew_creds(context::current(), lifetime).await?;
+
+        if detach {
+            Ok(proc.pid())
+        } else {
+            drop(ipc);
+            proc.wait().await;
+            Ok(None)
+        }
     }
 }
 
 pub async fn do_privilege_separation() -> Result<(), Error> {
-    privsep::serve_user_process().map_err(Into::into).await
+    privsep::serve_user_process().err_into().await
 }
