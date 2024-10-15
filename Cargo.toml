@@ -33,6 +33,7 @@ regex-lite = "0.1.5"
 serde = { version = "1.0.203", features = ["derive"] }
 serde_with = "3.8.1"
 snafu = "0.8.3"
+stubborn-io = "0.3.5"
 tarpc = { version = "0.34.0", features = ["serde-transport", "serde-transport-bincode", "tcp"] }
 tokio = { version = "1.37.0", features = ["sync", "net", "rt-multi-thread", "process", "macros"] }
 tracing = "0.1.40"

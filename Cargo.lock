@@ -1364,6 +1364,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
+name = "stubborn-io"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "373a722240991e091384a571e1fd8abde15eca4494a1a2bff95dbf603d15a866"
+dependencies = [
+ "log",
+ "rand",
+ "tokio",
+]
+
+[[package]]
 name = "sybil"
 version = "1.0.2"
 dependencies = [
@@ -1383,6 +1394,7 @@ dependencies = [
  "serde",
  "serde_with",
  "snafu",
+ "stubborn-io",
  "tarpc",
  "tokio",
  "tracing",

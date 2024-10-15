@@ -30,11 +30,13 @@ use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
     thread,
+    time::{Duration, SystemTime},
 };
+use stubborn_io::{ReconnectOptions, StubbornTcpStream};
 use tarpc::{
     client::RpcError,
     context::{self, Context},
-    serde_transport::tcp,
+    serde_transport::{tcp, Transport},
     server::{BaseChannel, Channel},
     tokio_serde::formats::Bincode,
 };
@@ -361,27 +363,35 @@ pub async fn new_server(
 }
 
 pub async fn new_client(
-    addrs: Option<impl ToSocketAddrs + Display>,
+    addrs: Option<impl ToSocketAddrs + Display + Sync + Unpin + Send + Clone + 'static>,
     princ: Option<&str>,
     enterprise: bool,
     delegate: bool,
 ) -> Result<Client, Error> {
     conf::print_client_config();
 
-    let transport = match addrs {
+    let retries = ReconnectOptions::new()
+        .with_retries_generator(|| vec![Duration::from_secs(1), Duration::from_secs(5), Duration::from_secs(10)]);
+
+    let (host, rpc) = match addrs {
         Some(addrs) => {
             tracing::info!(%addrs, "connecting to sybil server");
-            tcp::connect(addrs, Bincode::default).await?
+            let stream = StubbornTcpStream::connect_with_options(addrs, retries).await?;
+            let host = dns::lookup_address(&stream.deref().peer_addr()?.ip()).await?;
+            let transport = Transport::from((stream, Bincode::default()));
+            let rpc = SybilClient::new(Default::default(), transport).spawn();
+            (host, rpc)
         }
         None => {
             let addrs = dns::lookup_service(SYBIL_SRV_RECORD).await?;
             tracing::info!(?addrs, "connecting to sybil server");
-            tcp::connect(&*addrs, Bincode::default).await?
+            let stream = StubbornTcpStream::connect_with_options(&*addrs.leak(), retries).await?; // FIXME avoid leak
+            let host = dns::lookup_address(&stream.deref().peer_addr()?.ip()).await?;
+            let transport = Transport::from((stream, Bincode::default()));
+            let rpc = SybilClient::new(Default::default(), transport).spawn();
+            (host, rpc)
         }
     };
-
-    let host = dns::lookup_address(&transport.peer_addr()?.ip()).await?;
-    let rpc = SybilClient::new(Default::default(), transport).spawn();
     let gss = gss::new_client_ctx(princ, &format!("{SYBIL_SERVICE}@{host}"), enterprise, delegate)?;
 
     Ok(Client { rpc, gss })
