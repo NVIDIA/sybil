@@ -150,9 +150,12 @@ impl Sybil for SybilServer {
             tracing::error!(%error, principal = %format!("{user}@{realm}"), "could not find user for principal");
             SybilError::KerberosCreds
         })?;
-        if target_user != id.username(false).unwrap() {
-            tracing::error!(%user, %realm, "translation mismatch for user principal in realm");
-            return Err(SybilError::KerberosCreds);
+        match (User::from_name(&target_user), id.username(false)) {
+            (Ok(Some(target)), Some(username)) if target.name == username => (),
+            _ => {
+                tracing::error!(%user, %realm, "translation mismatch for user principal in realm");
+                return Err(SybilError::KerberosCreds);
+            }
         }
 
         let princ = if config().ticket.cross_realm {
