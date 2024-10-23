@@ -61,7 +61,7 @@ struct FetchArguments {
 #[tokio::main(flavor = "current_thread")]
 #[snafu::report]
 async fn main() -> Result<(), sybil::Error> {
-    if std::env::var(sybil::PRIVSEP_SYSLOG).is_ok() {
+    if std::env::var(sybil::SYBIL_ENV_SYSLOG).is_ok() {
         let syslog = Syslog::new(
             CStr::from_bytes_with_nul(b"sybil\0").unwrap(),
             Default::default(),
@@ -80,13 +80,13 @@ async fn main() -> Result<(), sybil::Error> {
             .init();
     }
 
-    if std::env::var(sybil::PRIVSEP_USER).is_ok() {
+    if std::env::var(sybil::SYBIL_ENV_USER).is_ok() {
         return sybil::do_privilege_separation().await;
     }
 
     let main_args: Arguments = argh::from_env();
     if let Some(host) = &main_args.host {
-        std::env::set_var(sybil::PRIVSEP_HOST, host);
+        std::env::set_var(sybil::SYBIL_ENV_HOST, host);
     }
 
     match main_args.command {

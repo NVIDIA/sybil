@@ -13,7 +13,6 @@ mod utils;
 
 use crate::conf::config;
 use crate::gss::{CredUsage, SecurityContext, MECH};
-pub use crate::privsep::{PRIVSEP_HOST, PRIVSEP_SYSLOG, PRIVSEP_USER};
 use crate::utils::*;
 
 use futures::prelude::*;
@@ -52,6 +51,11 @@ const SYBIL_PORT: u16 = 57811;
 const SYBIL_SERVICE: &str = "sybil";
 const SYBIL_SRV_RECORD: &str = "_sybil._tcp";
 const SYBIL_CREDS_STORE: &str = "KCM:";
+
+pub const SYBIL_ENV_CONFIG: &str = "SYBIL_CONFIG";
+pub const SYBIL_ENV_USER: &str = "SYBIL_USER";
+pub const SYBIL_ENV_HOST: &str = "SYBIL_HOST";
+pub const SYBIL_ENV_SYSLOG: &str = "SYBIL_SYSLOG";
 
 #[derive(Debug, Snafu)]
 pub enum Error {

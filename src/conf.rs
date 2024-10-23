@@ -4,6 +4,7 @@
  */
 
 use crate::utils::*;
+use crate::SYBIL_ENV_CONFIG;
 
 use netaddr2::NetAddr;
 use regex_lite::Regex;
@@ -123,7 +124,7 @@ pub fn config() -> &'static Config {
             conf = conf.add_source(src);
         }
 
-        if let Some(src) = env::var("SYBIL_CONFIG")
+        if let Some(src) = env::var(SYBIL_ENV_CONFIG)
             .ok()
             .filter(|p| !p.trim().is_empty())
             .map(|f| config::File::with_name(&f).required(false))

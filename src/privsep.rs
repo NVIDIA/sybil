@@ -5,6 +5,7 @@
 
 use crate::conf::config;
 use crate::krb;
+use crate::{SYBIL_ENV_HOST, SYBIL_ENV_SYSLOG, SYBIL_ENV_USER};
 
 use futures::prelude::*;
 use nix::{
@@ -35,10 +36,6 @@ use tokio::{
     time::{self, Duration, Instant},
 };
 use tokio_util::task::TaskTracker;
-
-pub const PRIVSEP_USER: &str = "SYBIL_PRIVSEP_USER";
-pub const PRIVSEP_HOST: &str = "SYBIL_PRIVSEP_HOST";
-pub const PRIVSEP_SYSLOG: &str = "SYBIL_PRIVSEP_SYSLOG";
 
 #[derive(Debug, Snafu)]
 #[snafu(context(suffix(false)))]
@@ -84,7 +81,7 @@ impl PrivSep for UserProcess {
                 timer.tick().await;
                 ticks += 1;
 
-                match crate::new_client(env::var(PRIVSEP_HOST).ok(), None, false, false)
+                match crate::new_client(env::var(SYBIL_ENV_HOST).ok(), None, false, false)
                     .and_then(|mut c| async move {
                         c.authenticate().await?;
                         c.fetch(None).await
@@ -131,14 +128,14 @@ pub fn spawn_user_process(user: &User, syslog: bool) -> Result<(PrivSepClient, P
     let mut cmd = Command::new(&config().binary_path);
     cmd.env_clear()
         .envs(env)
-        .env(PRIVSEP_USER, &user.name)
+        .env(SYBIL_ENV_USER, &user.name)
         .current_dir("/")
         .stdin(stdin)
         .uid(user.uid.into())
         .gid(user.gid.into());
 
     if syslog {
-        cmd.env(PRIVSEP_SYSLOG, "true");
+        cmd.env(SYBIL_ENV_SYSLOG, "true");
     }
 
     let proc = unsafe {
@@ -181,7 +178,7 @@ impl PrivSepChild {
     }
 }
 
-#[tracing::instrument(fields(user = env::var(PRIVSEP_USER).unwrap()))]
+#[tracing::instrument(fields(user = env::var(SYBIL_ENV_USER).unwrap()))]
 pub async fn serve_user_process() -> Result<(), Error> {
     tracing::debug!("serving user process");
     let stdin = unsafe { StdUnixStream::from_raw_fd(io::stdin().as_raw_fd()) };
