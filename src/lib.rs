@@ -389,6 +389,7 @@ pub async fn new_client(
     conf::print_client_config();
 
     let retries = ReconnectOptions::new()
+        .with_exit_if_first_connect_fails(false)
         .with_retries_generator(|| vec![Duration::from_secs(1), Duration::from_secs(5), Duration::from_secs(10)]);
 
     let (host, rpc) = match addrs {
