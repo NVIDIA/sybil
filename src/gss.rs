@@ -63,6 +63,25 @@ pub fn new_server_ctx(serv_princ: &str) -> Result<ServerCtx, Error> {
     Ok(ServerCtx::new(cred))
 }
 
+fn uppercase_principal(princ: &str, enterprise: bool) -> String {
+    let mut iter = princ.chars();
+    let mut princ = String::new();
+    let mut first_at = true;
+
+    while let Some(c) = iter.next() {
+        princ.push(c);
+        match c {
+            '\\' => iter.next().map_or((), |c| princ.push(c)),
+            '@' if enterprise && first_at => first_at = false,
+            '@' => break,
+            _ => (),
+        };
+    }
+    iter.flat_map(|c| c.to_uppercase()).for_each(|c| princ.push(c));
+
+    princ
+}
+
 pub fn new_client_ctx(
     clnt_princ: Option<&str>,
     serv_princ: &str,
@@ -90,7 +109,7 @@ pub fn new_client_ctx(
 
     if let Some(clnt_princ) = clnt_princ {
         let clnt_princ = Name::new(
-            clnt_princ.as_bytes(),
+            uppercase_principal(clnt_princ, enterprise).as_bytes(),
             enterprise
                 .then_some(&GSS_NT_KRB5_ENTERPRISE_NAME)
                 .or(Some(&GSS_NT_KRB5_PRINCIPAL)),
