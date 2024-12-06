@@ -49,13 +49,38 @@ impl Deref for Token {
     }
 }
 
-pub fn new_server_ctx(serv_princ: &str) -> Result<ServerCtx, Error> {
+pub enum Principal<'a> {
+    Common(&'a str),
+    Enterprise(&'a str),
+}
+
+impl<'a> Deref for Principal<'a> {
+    type Target = str;
+
+    fn deref(&self) -> &'a Self::Target {
+        match self {
+            Self::Common(s) => s,
+            Self::Enterprise(s) => s,
+        }
+    }
+}
+
+#[derive(PartialEq)]
+pub enum DelegatePolicy {
+    None,
+    Delegate,
+    ForceDelegate,
+}
+
+pub fn new_server_ctx(serv_princ: Principal) -> Result<ServerCtx, Error> {
     let mut mechs = OidSet::new().unwrap();
     mechs.add(MECH).unwrap();
 
     let serv_princ = Name::new(serv_princ.as_bytes(), Some(&GSS_NT_HOSTBASED_SERVICE))
         .and_then(|s| s.canonicalize(Some(MECH)))
-        .context(InvalidPrincipal { princ: serv_princ })?;
+        .context(InvalidPrincipal {
+            princ: serv_princ.to_string(),
+        })?;
 
     tracing::debug!(source = %serv_princ, "initializing GSS context");
     let cred = Cred::acquire(Some(&serv_princ), None, CredUsage::Accept, Some(&mechs))?;
@@ -63,58 +88,66 @@ pub fn new_server_ctx(serv_princ: &str) -> Result<ServerCtx, Error> {
     Ok(ServerCtx::new(cred))
 }
 
-fn uppercase_principal(princ: &str, enterprise: bool) -> String {
+fn principal_realm_to_upper(princ: &Principal) -> String {
     let mut iter = princ.chars();
-    let mut princ = String::new();
+    let mut buf = String::new();
     let mut first_at = true;
 
     while let Some(c) = iter.next() {
-        princ.push(c);
+        buf.push(c);
         match c {
-            '\\' => iter.next().map_or((), |c| princ.push(c)),
-            '@' if enterprise && first_at => first_at = false,
+            '\\' => iter.next().map_or((), |c| buf.push(c)),
+            '@' if matches!(princ, Principal::Enterprise(_)) && first_at => first_at = false,
             '@' => break,
             _ => (),
         };
     }
-    iter.flat_map(|c| c.to_uppercase()).for_each(|c| princ.push(c));
+    iter.flat_map(|c| c.to_uppercase()).for_each(|c| buf.push(c));
 
-    princ
+    buf
+}
+
+fn principal_kind_to_oid(princ: &Principal) -> &'static Oid {
+    match princ {
+        Principal::Common(_) => &GSS_NT_KRB5_PRINCIPAL,
+        Principal::Enterprise(_) => &GSS_NT_KRB5_ENTERPRISE_NAME,
+    }
 }
 
 pub fn new_client_ctx(
-    clnt_princ: Option<&str>,
-    serv_princ: &str,
-    enterprise: bool,
-    delegate: bool,
+    clnt_princ: Option<Principal>,
+    serv_princ: Principal,
+    delegate: DelegatePolicy,
 ) -> Result<ClientCtx, Error> {
     let mut mechs = OidSet::new().unwrap();
     mechs.add(MECH).unwrap();
 
     let mut flags = CtxFlags::GSS_C_MUTUAL_FLAG | CtxFlags::GSS_C_CONF_FLAG | CtxFlags::GSS_C_INTEG_FLAG;
-    if delegate {
-        if config().policy.force_delegate {
-            flags |= CtxFlags::GSS_C_DELEG_POLICY_FLAG | CtxFlags::GSS_C_DELEG_FLAG;
-        } else {
-            flags |= CtxFlags::GSS_C_DELEG_POLICY_FLAG;
+    match delegate {
+        DelegatePolicy::ForceDelegate if config().policy.force_delegate => {
+            flags |= CtxFlags::GSS_C_DELEG_POLICY_FLAG | CtxFlags::GSS_C_DELEG_FLAG
         }
+        DelegatePolicy::Delegate | DelegatePolicy::ForceDelegate => flags |= CtxFlags::GSS_C_DELEG_POLICY_FLAG,
+        _ => (),
     };
 
     let serv_princ = Name::new(serv_princ.as_bytes(), Some(&GSS_NT_HOSTBASED_SERVICE))
         .and_then(|s| s.canonicalize(Some(MECH)))
-        .context(InvalidPrincipal { princ: serv_princ })?;
+        .context(InvalidPrincipal {
+            princ: serv_princ.to_string(),
+        })?;
 
     tracing::debug!(target = %serv_princ, "initializing GSS context");
     let mut cred = Cred::acquire(None, None, CredUsage::Initiate, Some(&mechs)).context(BadHostCreds)?;
 
     if let Some(clnt_princ) = clnt_princ {
         let clnt_princ = Name::new(
-            uppercase_principal(clnt_princ, enterprise).as_bytes(),
-            enterprise
-                .then_some(&GSS_NT_KRB5_ENTERPRISE_NAME)
-                .or(Some(&GSS_NT_KRB5_PRINCIPAL)),
+            principal_realm_to_upper(&clnt_princ).as_bytes(),
+            Some(principal_kind_to_oid(&clnt_princ)),
         )
-        .context(InvalidPrincipal { princ: clnt_princ })?;
+        .context(InvalidPrincipal {
+            princ: clnt_princ.to_string(),
+        })?;
 
         tracing::debug!(principal = %clnt_princ, "impersonating principal");
         cred = cred

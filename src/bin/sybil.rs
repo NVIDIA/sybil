@@ -50,12 +50,12 @@ struct FetchArguments {
     /// UID to masquerade as
     #[argh(option, short = 'u')]
     uid: Option<u32>,
-    /// renew credentials indefinitely
+    /// refresh credentials indefinitely
     #[argh(switch, short = 'R')]
-    renew: bool,
-    /// detach the renewing process
+    refresh: bool,
+    /// daemonize the refreshing process
     #[argh(switch, short = 'd')]
-    detach: bool,
+    daemonize: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -91,21 +91,32 @@ async fn main() -> Result<(), sybil::Error> {
 
     match main_args.command {
         Command::Kinit(args) => {
-            let mut client =
-                sybil::new_client(main_args.host, args.principal.as_deref(), args.enterprise, false).await?;
+            let princ = if args.enterprise {
+                args.principal.as_deref().map(sybil::Principal::Enterprise)
+            } else {
+                args.principal.as_deref().map(sybil::Principal::Common)
+            };
+            let mut client = sybil::new_client(main_args.host, princ, sybil::DelegatePolicy::None).await?;
             client.authenticate().await?;
             client.kinit().await?;
         }
         Command::Store(_) => {
-            let mut client = sybil::new_client(main_args.host, None, false, true).await?;
+            let mut client = sybil::new_client(main_args.host, None, sybil::DelegatePolicy::ForceDelegate).await?;
             client.authenticate().await?;
             client.store().await?;
         }
         Command::Fetch(args) => {
-            let mut client = sybil::new_client(main_args.host, None, false, false).await?;
+            let mut client = sybil::new_client(main_args.host, None, sybil::DelegatePolicy::None).await?;
             client.authenticate().await?;
-            if args.renew {
-                client.fetch_and_renew(args.uid, args.detach).await?;
+            if args.refresh {
+                let strat = if args.daemonize {
+                    sybil::RefreshStrategy::Daemon
+                } else {
+                    sybil::RefreshStrategy::Wait
+                };
+                if let Some(pid) = client.fetch_and_refresh(args.uid, strat).await? {
+                    println!("{pid}");
+                }
             } else {
                 client.fetch(args.uid).await?;
             }

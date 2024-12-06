@@ -167,6 +167,10 @@ pub fn print_server_config() {
 
 pub fn print_client_config() {
     tracing::info!(
+        binary_path = %config().binary_path.display(),
+        "main configuration"
+    );
+    tracing::info!(
         force_delegate = %config().policy.force_delegate,
         "policy configuration"
     );

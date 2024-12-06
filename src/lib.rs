@@ -11,6 +11,8 @@ mod krb;
 mod privsep;
 mod utils;
 
+pub use crate::gss::{DelegatePolicy, Principal};
+
 use crate::conf::config;
 use crate::gss::{CredUsage, SecurityContext, MECH};
 use crate::utils::*;
@@ -117,6 +119,13 @@ pub struct Server<S: Future> {
 pub struct Client {
     rpc: SybilClient,
     gss: gss::ClientCtx,
+}
+
+#[derive(PartialEq)]
+pub enum RefreshStrategy {
+    Wait,
+    Detach,
+    Daemon,
 }
 
 impl Sybil for SybilServer {
@@ -314,7 +323,7 @@ impl SybilServer {
 fn new_service(peer: IpAddr) -> Option<(SybilServer, tracing::Span)> {
     let span = tracing::info_span!("sybil_service", %peer).entered();
 
-    let srv = match gss::new_server_ctx(SYBIL_SERVICE) {
+    let srv = match gss::new_server_ctx(Principal::Common(SYBIL_SERVICE)) {
         Ok(gss) => SybilServer {
             peer,
             gss: Arc::new(Mutex::new(gss)),
@@ -389,9 +398,8 @@ pub async fn new_server(
 
 pub async fn new_client(
     addrs: Option<impl ToSocketAddrs + Display + Sync + Unpin + Send + Clone + 'static>,
-    princ: Option<&str>,
-    enterprise: bool,
-    delegate: bool,
+    princ: Option<Principal<'_>>,
+    delegate: DelegatePolicy,
 ) -> Result<Client, Error> {
     conf::print_client_config();
 
@@ -418,7 +426,7 @@ pub async fn new_client(
             (host, rpc)
         }
     };
-    let gss = gss::new_client_ctx(princ, &format!("{SYBIL_SERVICE}@{host}"), enterprise, delegate)?;
+    let gss = gss::new_client_ctx(princ, Principal::Common(&format!("{SYBIL_SERVICE}@{host}")), delegate)?;
 
     Ok(Client { rpc, gss })
 }
@@ -552,7 +560,7 @@ impl Client {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn fetch_and_renew(&mut self, uid: Option<u32>, detach: bool) -> Result<Option<Pid>, Error> {
+    pub async fn fetch_and_refresh(&mut self, uid: Option<u32>, strat: RefreshStrategy) -> Result<Option<Pid>, Error> {
         tracing::info!("retrieving kerberos credentials");
         let creds = self.rpc.get_creds(context::current(), uid).await??;
 
@@ -569,18 +577,21 @@ impl Client {
             .map_err(Into::<krb::Error>::into)?;
 
         tracing::info!("storing kerberos credentials");
-        let (ipc, mut proc) =
-            privsep::spawn_user_process_from_uid(uid.map_or_else(Uid::effective, Into::into), detach)?;
+        let (ipc, mut proc) = privsep::spawn_user_process_from_uid(
+            uid.map_or_else(Uid::effective, Into::into),
+            strat == RefreshStrategy::Daemon,
+        )?;
         ipc.store_creds(context::current(), creds).await??;
-        tracing::info!("starting renewing kerberos credentials");
-        ipc.renew_creds(context::current(), lifetime).await?;
+        tracing::info!("starting refreshing kerberos credentials");
+        ipc.refresh_creds(context::current(), lifetime).await?;
 
-        if detach {
-            Ok(proc.pid())
-        } else {
-            drop(ipc);
-            proc.wait().await;
-            Ok(None)
+        match strat {
+            RefreshStrategy::Detach | RefreshStrategy::Daemon => Ok(proc.pid()),
+            RefreshStrategy::Wait => {
+                drop(ipc);
+                proc.wait().await;
+                Ok(None)
+            }
         }
     }
 }

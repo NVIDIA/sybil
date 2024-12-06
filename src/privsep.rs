@@ -14,7 +14,7 @@ use nix::{
         prctl,
         signal::{self, Signal},
     },
-    unistd::{Pid, Uid, User},
+    unistd::{self, Pid, Uid, User},
 };
 use snafu::prelude::*;
 use std::{
@@ -58,7 +58,7 @@ pub enum Error {
 #[tarpc::service]
 pub trait PrivSep {
     async fn store_creds(creds: krb::Credentials) -> Result<(), krb::Error>;
-    async fn renew_creds(lifetime: Duration);
+    async fn refresh_creds(lifetime: Duration);
 }
 
 #[derive(Clone)]
@@ -71,7 +71,7 @@ impl PrivSep for UserProcess {
         creds.store()
     }
 
-    async fn renew_creds(self, _: context::Context, lifetime: Duration) {
+    async fn refresh_creds(self, _: context::Context, lifetime: Duration) {
         self.tasks.spawn(async move {
             let halflife = |l| Instant::now() + l / 2;
             let mut timer = time::interval_at(halflife(lifetime), lifetime / 10);
@@ -81,7 +81,7 @@ impl PrivSep for UserProcess {
                 timer.tick().await;
                 ticks += 1;
 
-                match crate::new_client(env::var(SYBIL_ENV_HOST).ok(), None, false, false)
+                match crate::new_client(env::var(SYBIL_ENV_HOST).ok(), None, crate::DelegatePolicy::None)
                     .and_then(|mut c| async move {
                         c.authenticate().await?;
                         c.fetch(None).await
@@ -92,7 +92,7 @@ impl PrivSep for UserProcess {
                         timer.reset_at(halflife(lifetime));
                         ticks = 0
                     }
-                    Err(error) => tracing::error!(%error, "could not renew kerberos credentials"),
+                    Err(error) => tracing::error!(%error, "could not refresh kerberos credentials"),
                 };
             }
             tracing::error!("maximum retries exhausted, exiting");
@@ -100,23 +100,23 @@ impl PrivSep for UserProcess {
     }
 }
 
-pub fn spawn_user_process_from_name(user: &str, syslog: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
+pub fn spawn_user_process_from_name(user: &str, daemonize: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
     let user = User::from_name(user)
         .context(LookupUser)?
         .context(UserNotFound { user })?;
 
-    spawn_user_process(&user, syslog)
+    spawn_user_process(&user, daemonize)
 }
 
-pub fn spawn_user_process_from_uid(uid: Uid, syslog: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
+pub fn spawn_user_process_from_uid(uid: Uid, daemonize: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
     let user = User::from_uid(uid)
         .context(LookupUser)?
         .context(UserNotFound { user: uid.to_string() })?;
 
-    spawn_user_process(&user, syslog)
+    spawn_user_process(&user, daemonize)
 }
 
-pub fn spawn_user_process(user: &User, syslog: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
+pub fn spawn_user_process(user: &User, daemonize: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
     let ppid = Pid::this();
     let env: Vec<(String, String)> = env::vars()
         .filter(|(v, _)| v == "RUST_LOG" || v == "KRB5_TRACE" || v.starts_with("SYBIL_"))
@@ -134,15 +134,21 @@ pub fn spawn_user_process(user: &User, syslog: bool) -> Result<(PrivSepClient, P
         .uid(user.uid.into())
         .gid(user.gid.into());
 
-    if syslog {
-        cmd.env(SYBIL_ENV_SYSLOG, "true");
+    if daemonize || env::var(SYBIL_ENV_SYSLOG).is_ok() {
+        cmd.env(SYBIL_ENV_SYSLOG, "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
     }
 
     let proc = unsafe {
         cmd.pre_exec(move || {
-            prctl::set_pdeathsig(Signal::SIGTERM)?;
-            if Pid::parent() != ppid {
-                signal::kill(Pid::this(), Signal::SIGTERM)?;
+            if daemonize {
+                unistd::setsid()?;
+            } else {
+                prctl::set_pdeathsig(Signal::SIGTERM)?;
+                if Pid::parent() != ppid {
+                    signal::kill(Pid::this(), Signal::SIGTERM)?;
+                }
             }
             close_fds::set_fds_cloexec(3, &[]);
             Ok(())
