@@ -340,7 +340,7 @@ pub async fn new_server(
     addrs: Option<impl ToSocketAddrs + Display>,
     max_conn: usize,
 ) -> Result<Server<impl Future>, Error> {
-    conf::print_server_config();
+    conf::load_server_config();
 
     let transport = match addrs {
         Some(addrs) => {
@@ -401,7 +401,7 @@ pub async fn new_client(
     princ: Option<Principal<'_>>,
     delegate: DelegatePolicy,
 ) -> Result<Client, Error> {
-    conf::print_client_config();
+    conf::load_client_config();
 
     let retries = ReconnectOptions::new()
         .with_exit_if_first_connect_fails(false)

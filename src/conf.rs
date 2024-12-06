@@ -4,7 +4,7 @@
  */
 
 use crate::utils::*;
-use crate::SYBIL_ENV_CONFIG;
+use crate::{SYBIL_ENV_CONFIG, SYBIL_ENV_USER};
 
 use netaddr2::NetAddr;
 use regex_lite::Regex;
@@ -142,7 +142,7 @@ pub fn config() -> &'static Config {
     })
 }
 
-pub fn print_server_config() {
+pub fn load_server_config() {
     tracing::info!(
         cipher = %config().ticket.cipher,
         flags = %config().ticket.flags,
@@ -165,11 +165,12 @@ pub fn print_server_config() {
     });
 }
 
-pub fn print_client_config() {
-    tracing::info!(
-        binary_path = %config().binary_path.display(),
-        "main configuration"
-    );
+pub fn load_client_config() {
+    if env::var(SYBIL_ENV_USER).is_ok() {
+        _ = config();
+        return;
+    }
+
     tracing::info!(
         force_delegate = %config().policy.force_delegate,
         "policy configuration"
