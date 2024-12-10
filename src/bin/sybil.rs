@@ -4,7 +4,6 @@
  */
 
 use argh::FromArgs;
-use std::ffi::CStr;
 use syslog_tracing::Syslog;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -58,27 +57,32 @@ struct FetchArguments {
     daemonize: bool,
 }
 
+fn setup_log(syslog: bool) {
+    let layer = if syslog {
+        let writer = Syslog::new(c"sybil", Default::default(), Default::default()).expect("could not open syslog");
+
+        fmt::layer()
+            .without_time()
+            .with_level(false)
+            .compact()
+            .with_writer(writer)
+            .boxed()
+    } else if std::env::var("RUST_LOG_STYLE").is_ok_and(|v| v == "SYSTEMD") {
+        fmt::layer().without_time().compact().boxed()
+    } else {
+        fmt::layer().boxed()
+    };
+
+    tracing_subscriber::registry()
+        .with(layer)
+        .with(EnvFilter::from_default_env())
+        .init();
+}
+
 #[tokio::main(flavor = "current_thread")]
 #[snafu::report]
 async fn main() -> Result<(), sybil::Error> {
-    if std::env::var(sybil::SYBIL_ENV_SYSLOG).is_ok() {
-        let syslog = Syslog::new(
-            CStr::from_bytes_with_nul(b"sybil\0").unwrap(),
-            Default::default(),
-            Default::default(),
-        )
-        .unwrap();
-
-        tracing_subscriber::registry()
-            .with(fmt::layer().with_writer(syslog))
-            .with(EnvFilter::from_default_env())
-            .init();
-    } else {
-        tracing_subscriber::registry()
-            .with(fmt::layer())
-            .with(EnvFilter::from_default_env())
-            .init();
-    }
+    setup_log(std::env::var(sybil::SYBIL_ENV_SYSLOG).is_ok());
 
     if std::env::var(sybil::SYBIL_ENV_USER).is_ok() {
         return sybil::do_privilege_separation().await;

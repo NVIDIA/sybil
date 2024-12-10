@@ -27,12 +27,22 @@ async fn run(args: Arguments) -> Result<(), sybil::Error> {
     Ok(())
 }
 
-#[snafu::report]
-fn main() -> Result<(), sybil::Error> {
+fn setup_log() {
+    let layer = if std::env::var("RUST_LOG_STYLE").is_ok_and(|v| v == "SYSTEMD") {
+        fmt::layer().without_time().compact().boxed()
+    } else {
+        fmt::layer().boxed()
+    };
+
     tracing_subscriber::registry()
-        .with(fmt::layer())
+        .with(layer)
         .with(EnvFilter::from_default_env())
         .init();
+}
+
+#[snafu::report]
+fn main() -> Result<(), sybil::Error> {
+    setup_log();
 
     let main_args: Arguments = argh::from_env();
 

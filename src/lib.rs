@@ -136,8 +136,8 @@ impl Sybil for SybilServer {
             .lock()
             .await
             .step(&token)
-            .map_err(|error| {
-                tracing::error!(%error, "could not initialize GSS context");
+            .map_err(|err| {
+                tracing::error!(error = err.chain(), "could not initialize GSS context");
                 SybilError::GssHandshake
             })?
             .map(Into::into);
@@ -154,13 +154,13 @@ impl Sybil for SybilServer {
             tracing::warn!(principal = %id.principal, "could not find user for principal");
             SybilError::UserNotFound
         })?;
-        let realm = krb::default_realm().map_err(|error| {
-            tracing::error!(%error, "could not retrieve default realm");
+        let realm = krb::default_realm().map_err(|err| {
+            tracing::error!(error = err.chain(), "could not retrieve default realm");
             SybilError::KerberosCreds
         })?;
 
-        let target_user = krb::local_user(user).map_err(|error| {
-            tracing::error!(%error, principal = %format!("{user}@{realm}"), "could not find user for principal");
+        let target_user = krb::local_user(user).map_err(|err| {
+            tracing::error!(error = err.chain(), principal = %format!("{user}@{realm}"), "could not find user for principal");
             SybilError::KerberosCreds
         })?;
         match (User::from_name(&target_user), id.username(false)) {
@@ -194,8 +194,8 @@ impl Sybil for SybilServer {
             Some(&config().ticket.lifetime),
             Some(&config().ticket.renewable_lifetime),
         )
-        .map_err(|error| {
-            tracing::error!(%error, %user, "could not forge credentials");
+        .map_err(|err| {
+            tracing::error!(error = err.chain(), %user, "could not forge credentials");
             SybilError::KerberosCreds
         })?;
 
@@ -204,8 +204,8 @@ impl Sybil for SybilServer {
             .lock()
             .await
             .wrap(true, &creds)
-            .map_err(|error| {
-                tracing::error!(%error, "could not encrypt credentials");
+            .map_err(|err| {
+                tracing::error!(error = err.chain(), "could not encrypt credentials");
                 SybilError::GssEncrypt
             })
             .map(Into::into)
@@ -241,8 +241,8 @@ impl Sybil for SybilServer {
                     .store(SYBIL_CREDS_STORE, true, true, CredUsage::Initiate, Some(MECH))
                     .boxed()
             });
-            t.join().unwrap().map_err(|error| {
-                tracing::error!(%error, "could not store credentials");
+            t.join().unwrap().map_err(|err| {
+                tracing::error!(error = err.chain(), "could not store credentials");
                 SybilError::CredsStore
             })
         })
@@ -288,8 +288,8 @@ impl Sybil for SybilServer {
                     .map_err(|err| format!("setuid {uid} failed: {err}"))?;
                 krb::fetch_credentials(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime)).boxed()
             });
-            t.join().unwrap().map_err(|error| {
-                tracing::error!(%error, "could not fetch credentials");
+            t.join().unwrap().map_err(|err| {
+                tracing::error!(error = err.chain(), "could not fetch credentials");
                 SybilError::CredsStore
             })
         })?;
@@ -301,8 +301,8 @@ impl Sybil for SybilServer {
             .lock()
             .await
             .wrap(true, &creds)
-            .map_err(|error| {
-                tracing::error!(%error, "could not encrypt credentials");
+            .map_err(|err| {
+                tracing::error!(error = err.chain(), "could not encrypt credentials");
                 SybilError::GssEncrypt
             })
             .map(Into::into)
@@ -328,8 +328,8 @@ fn new_service(peer: IpAddr) -> Option<(SybilServer, tracing::Span)> {
             peer,
             gss: Arc::new(Mutex::new(gss)),
         },
-        Err(error) => {
-            tracing::error!(%error, "could not initialize GSS context");
+        Err(err) => {
+            tracing::error!(error = err.chain(), "could not initialize GSS context");
             return None;
         }
     };
@@ -360,8 +360,8 @@ pub async fn new_server(
     let rpc = transport
         .filter_map(|t| async {
             t.map_or_else(
-                |error| {
-                    tracing::error!(%error, "could not accept connection");
+                |err| {
+                    tracing::error!(error = err.chain(), "could not accept connection");
                     None
                 },
                 Some,
@@ -374,8 +374,8 @@ pub async fn new_server(
             async move {
                 let peer = match c.transport().peer_addr() {
                     Ok(addr) => addr.ip(),
-                    Err(error) => {
-                        tracing::error!(%error, "could not retrieve peer address");
+                    Err(err) => {
+                        tracing::error!(error = err.chain(), "could not retrieve peer address");
                         return;
                     }
                 };
@@ -434,15 +434,15 @@ pub async fn new_client(
 impl<S: Future> Server<S> {
     pub async fn run(self) {
         let mut sigint = match signal(SignalKind::interrupt()) {
-            Err(error) => {
-                tracing::error!(%error, "could not setup SIGINT handler");
+            Err(err) => {
+                tracing::error!(error = err.chain(), "could not setup SIGINT handler");
                 return;
             }
             Ok(sig) => sig,
         };
         let mut sigterm = match signal(SignalKind::terminate()) {
-            Err(error) => {
-                tracing::error!(%error, "could not setup SIGTERM handler");
+            Err(err) => {
+                tracing::error!(error = err.chain(), "could not setup SIGTERM handler");
                 return;
             }
             Ok(sig) => sig,

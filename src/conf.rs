@@ -135,8 +135,8 @@ pub fn config() -> &'static Config {
         conf.add_source(config::Environment::with_prefix("SYBIL"))
             .build()
             .and_then(config::Config::try_deserialize)
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "could not load configuration");
+            .unwrap_or_else(|err| {
+                tracing::warn!(error = err.chain(), "could not load configuration");
                 Config::default()
             })
     })

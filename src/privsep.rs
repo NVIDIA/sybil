@@ -5,6 +5,7 @@
 
 use crate::conf::config;
 use crate::krb;
+use crate::utils::*;
 use crate::{SYBIL_ENV_HOST, SYBIL_ENV_SYSLOG, SYBIL_ENV_USER};
 
 use futures::prelude::*;
@@ -92,7 +93,7 @@ impl PrivSep for UserProcess {
                         timer.reset_at(halflife(lifetime));
                         ticks = 0
                     }
-                    Err(error) => tracing::error!(%error, "could not refresh kerberos credentials"),
+                    Err(err) => tracing::error!(error = err.chain(), "could not refresh kerberos credentials"),
                 };
             }
             tracing::error!("maximum retries exhausted, exiting");
@@ -166,7 +167,7 @@ pub struct PrivSepChild(Child);
 impl PrivSepChild {
     pub async fn wait(&mut self) {
         match self.0.wait().await {
-            Err(error) => tracing::warn!(%error, "could not wait on user process"),
+            Err(err) => tracing::warn!(error = err.chain(), "could not wait on user process"),
             Ok(status) if !status.success() && status.code().is_some() => tracing::warn!(
                 status = status.code().unwrap(),
                 "user process terminated with non-zero status"
@@ -190,8 +191,8 @@ pub async fn serve_user_process() -> Result<(), Error> {
     let stdin = unsafe { StdUnixStream::from_raw_fd(io::stdin().as_raw_fd()) };
     let transport = UnixStream::from_std(stdin)
         .map(|s| Transport::from((s, Bincode::default())))
-        .with_context(|error| {
-            tracing::error!(%error, "could not retrieve stream from stdin");
+        .with_context(|err| {
+            tracing::error!(error = err.chain(), "could not retrieve stream from stdin");
             ServeProcess
         })?;
     let proc = UserProcess {

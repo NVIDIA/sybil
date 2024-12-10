@@ -67,12 +67,12 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
     tracing::debug!(%perms, "performing authorization checks");
 
     let principal = gss.source_principal().map_or_else(
-        |error| { tracing::error!(%error, "could not retrieve source principal"); None },
+        |err| { tracing::error!(error = err.chain(), "could not retrieve source principal"); None },
         Into::into,
     )?;
 
     let user = gss.source_username().map_or_else(
-        |error| { tracing::debug!(%error, "could not retrieve source username"); None },
+        |err| { tracing::debug!(error = err.chain(), "could not retrieve source username"); None },
         |username| match User::from_name(&username) {
             Err(_) | Ok(None) => { tracing::debug!(%username, "could not lookup user"); None },
             Ok(user) => user,
@@ -81,7 +81,7 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
 
     let groups = user.as_ref().and_then(|u| {
         unistd::getgrouplist(&CString::new(u.name.as_str()).unwrap(), u.gid).map_or_else(
-            |error| { tracing::debug!(%error, username = %u.name, "could not lookup groups"); None },
+            |err| { tracing::debug!(error = err.chain(), username = %u.name, "could not lookup groups"); None },
             |groups| Some(
                 groups
                     .into_iter()
