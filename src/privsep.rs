@@ -5,7 +5,7 @@
 
 use crate::conf::config;
 use crate::krb;
-use crate::utils::*;
+use crate::trace::*;
 use crate::{SYBIL_ENV_HOST, SYBIL_ENV_SYSLOG, SYBIL_ENV_USER};
 
 use futures::prelude::*;

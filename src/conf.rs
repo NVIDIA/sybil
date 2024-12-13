@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::utils::*;
+use crate::trace::*;
 use crate::{SYBIL_ENV_CONFIG, SYBIL_ENV_USER};
 
 use netaddr2::NetAddr;

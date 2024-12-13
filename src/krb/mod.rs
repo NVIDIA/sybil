@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::utils::*;
-
 use nix::unistd::{self, SysconfVar};
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
@@ -27,6 +25,13 @@ mod cffi {
     #![allow(non_snake_case)]
     #![allow(dead_code)]
     include!(concat!(env!("OUT_DIR"), "/krbutil.rs"));
+}
+
+pub const fn const_cstr(cstr: &[u8]) -> &str {
+    match unsafe { CStr::from_bytes_with_nul_unchecked(cstr).to_str() } {
+        Ok(s) => s,
+        Err(_) => panic!("invalid UTF-8 in C string"),
+    }
 }
 
 pub const TGS_NAME: &str = const_cstr(cffi::KRB5_TGS_NAME);

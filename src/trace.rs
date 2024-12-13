@@ -5,7 +5,6 @@
 
 use std::{
     error::Error,
-    ffi::CStr,
     fmt::{Debug, Display, Write},
 };
 
@@ -15,10 +14,9 @@ pub trait DisplayOptExt {
 
 impl<T: Display> DisplayOptExt for Option<T> {
     fn display(&self) -> Box<dyn tracing::Value + '_> {
-        if self.is_some() {
-            Box::new(tracing::field::display(self.as_ref().unwrap()))
-        } else {
-            Box::new(tracing::field::Empty)
+        match self.as_ref() {
+            Some(v) => Box::new(tracing::field::display(v)),
+            None => Box::new(tracing::field::Empty),
         }
     }
 }
@@ -29,18 +27,10 @@ pub trait DebugOptExt {
 
 impl<T: Debug> DebugOptExt for Option<T> {
     fn debug(&self) -> Box<dyn tracing::Value + '_> {
-        if self.is_some() {
-            Box::new(tracing::field::debug(self.as_ref().unwrap()))
-        } else {
-            Box::new(tracing::field::Empty)
+        match self.as_ref() {
+            Some(v) => Box::new(tracing::field::debug(v)),
+            None => Box::new(tracing::field::Empty),
         }
-    }
-}
-
-pub const fn const_cstr(cstr: &[u8]) -> &str {
-    match unsafe { CStr::from_bytes_with_nul_unchecked(cstr).to_str() } {
-        Ok(s) => s,
-        Err(_) => panic!("invalid UTF-8 in C string"),
     }
 }
 

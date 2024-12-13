@@ -9,13 +9,13 @@ mod dns;
 mod gss;
 mod krb;
 mod privsep;
-mod utils;
+mod trace;
 
 pub use crate::gss::{DelegatePolicy, Principal};
 
 use crate::conf::config;
 use crate::gss::{CredUsage, SecurityContext, MECH};
-use crate::utils::*;
+use crate::trace::*;
 
 use futures::prelude::*;
 use nix::{
