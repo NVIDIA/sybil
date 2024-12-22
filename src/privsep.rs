@@ -21,7 +21,7 @@ use snafu::prelude::*;
 use std::{
     env, io,
     os::unix::process::ExitStatusExt,
-    os::{fd::AsRawFd, fd::FromRawFd, unix::net::UnixStream as StdUnixStream},
+    os::{fd::AsRawFd, fd::FromRawFd, fd::OwnedFd, unix::net::UnixStream as StdUnixStream},
     process::Stdio,
 };
 use tarpc::{
@@ -125,7 +125,7 @@ pub fn spawn_user_process(user: &User, daemonize: bool) -> Result<(PrivSepClient
 
     tracing::debug!(user = %user.name, "spawning user process");
     let (stream, ustream) = UnixStream::pair()?;
-    let stdin = unsafe { Stdio::from_raw_fd(stream.as_raw_fd()) };
+    let stdin: OwnedFd = stream.into_std()?.into();
     let mut cmd = Command::new(&config().binary_path);
     cmd.env_clear()
         .envs(env)
