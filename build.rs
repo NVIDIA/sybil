@@ -3,9 +3,65 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use std::{env, path::PathBuf};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 const SYBIL_ADMIN_PRINCIPAL: &str = "sybil/admin";
+const SLURM_BASE_URL: &str = "https://raw.githubusercontent.com/SchedMD/slurm/refs/heads";
+
+fn generate_spank_bindings(out_dir: &Path) {
+    println!("cargo:rerun-if-env-changed=SLURM_VERSION");
+
+    let (major, minor, branch) = env::var("SLURM_VERSION")
+        .map(|v| {
+            let (maj, min) = v.split_once('.').expect("malformed SLURM_VERSION");
+            (
+                maj.parse().unwrap_or(0),
+                min.parse().unwrap_or(0),
+                "slurm-".to_owned() + &v,
+            )
+        })
+        .unwrap_or((0, 0, "master".to_owned()));
+
+    let mut paths = Vec::new();
+
+    for file in [
+        "slurm/slurm.h",
+        "slurm/spank.h",
+        "slurm/slurm_errno.h",
+        "slurm/slurm_version.h.in",
+    ] {
+        let url = format!("{SLURM_BASE_URL}/{branch}/{file}");
+        let body = reqwest::blocking::get(url)
+            .and_then(|r| r.text())
+            .expect("failed to fetch spank header");
+
+        let path = out_dir.join(file).with_extension("").with_extension("h");
+        let header = body.replace(
+            "#undef SLURM_VERSION_NUMBER",
+            &format!("#define SLURM_VERSION_NUMBER 0x{:02x}{:02x}00", major, minor),
+        );
+        fs::create_dir_all(path.parent().unwrap()).expect("failed to create spank directory");
+        fs::write(&path, &header).expect("failed to write spank header");
+
+        paths.push(path.to_string_lossy().into_owned());
+    }
+
+    let bindings = bindgen::Builder::default()
+        .clang_arg(format!("-F{}", out_dir.display()))
+        .headers(&paths)
+        .generate_comments(false)
+        .layout_tests(false)
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .generate()
+        .expect("failed to generate spank bindings");
+
+    bindings
+        .write_to_file(out_dir.join("spank.rs"))
+        .expect("failed to write spank bindings");
+}
 
 fn main() {
     let out_dir = env::var("OUT_DIR").map(PathBuf::from).unwrap();
@@ -22,6 +78,7 @@ fn main() {
         .allowlist_function("krb5_copy_data")
         .allowlist_function("krb5_free_data")
         .allowlist_function("krb5_get_default_realm")
+        .allowlist_function("krb5_cc_default_name")
         .allowlist_function("krb5_free_default_realm")
         .allowlist_function("krb5_free_data_contents")
         .allowlist_function("krb5_get_error_message")
@@ -83,5 +140,19 @@ fn main() {
         "-lkadm5srv",
     ] {
         println!("cargo:rustc-link-arg-bin=sybild={}", flag);
+    }
+
+    if cfg!(feature = "slurm") {
+        generate_spank_bindings(&out_dir);
+
+        for flag in [
+            "-Wl,-Bstatic",
+            "-lkrbutil_clnt",
+            "-Wl,-Bdynamic",
+            "-lkrb5",
+            "-lk5crypto",
+        ] {
+            println!("cargo:rustc-cdylib-link-arg={}", flag);
+        }
     }
 }

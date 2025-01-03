@@ -186,6 +186,17 @@ pub fn default_realm() -> Result<String, Error> {
     }
 }
 
+#[allow(dead_code)]
+pub fn default_ccache() -> Result<String, Error> {
+    let ctx = CONTEXT.get();
+
+    unsafe {
+        let ptr = cffi::krb5_cc_default_name(ctx.0);
+        let ccache = CStr::from_ptr(ptr).to_str().map(str::to_owned);
+        Ok(ccache?)
+    }
+}
+
 pub fn local_user(princ: &str) -> Result<String, Error> {
     let size = match unistd::sysconf(SysconfVar::LOGIN_NAME_MAX) {
         Ok(Some(n)) => n as usize,
@@ -205,69 +216,70 @@ pub fn local_user(princ: &str) -> Result<String, Error> {
     }
 }
 
-pub fn forge_credentials(
-    clnt_princ: &str,
-    serv_princ: &str,
-    enc_type: &str,
-    tkt_flags: &str,
-    start_time: Option<&str>,
-    end_time: Option<&str>,
-    renew_till: Option<&str>,
-) -> Result<Credentials, Error> {
-    let mut creds = Credentials(ptr::null_mut());
-    let clnt_princ = CString::new(clnt_princ)?;
-    let serv_princ = CString::new(serv_princ)?;
-    let enc_type = CString::new(enc_type)?;
-    let tkt_flags = CString::new(tkt_flags)?;
-    let start_time = start_time.map(CString::new).transpose()?;
-    let end_time = end_time.map(CString::new).transpose()?;
-    let renew_till = renew_till.map(CString::new).transpose()?;
-
-    let ctx = CONTEXT.get();
-
-    let ret = unsafe {
-        cffi::krbutil_forge_creds(
-            ctx.0,
-            &mut creds.0,
-            clnt_princ.as_ptr(),
-            serv_princ.as_ptr(),
-            enc_type.as_ptr(),
-            tkt_flags.as_ptr(),
-            start_time.as_deref().map_or(ptr::null(), CStr::as_ptr),
-            end_time.as_deref().map_or(ptr::null(), CStr::as_ptr),
-            renew_till.as_deref().map_or(ptr::null(), CStr::as_ptr),
-        )
-    };
-    if ret == 0 {
-        Ok(creds)
-    } else {
-        Err(ret.into())
-    }
-}
-
-pub fn fetch_credentials(ccache: &str, min_life: Option<&str>) -> Result<Credentials, Error> {
-    let mut creds = Credentials(ptr::null_mut());
-    let ccache = CString::new(ccache)?;
-    let min_life = min_life.map(CString::new).transpose()?;
-
-    let ctx = CONTEXT.get();
-
-    let ret = unsafe {
-        cffi::krbutil_fetch_creds(
-            ctx.0,
-            &mut creds.0,
-            ccache.as_ptr(),
-            min_life.as_deref().map_or(ptr::null(), CStr::as_ptr),
-        )
-    };
-    if ret == 0 {
-        Ok(creds)
-    } else {
-        Err(ret.into())
-    }
-}
-
 impl Credentials {
+    pub fn forge(
+        clnt_princ: &str,
+        serv_princ: &str,
+        enc_type: &str,
+        tkt_flags: &str,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+        renew_till: Option<&str>,
+    ) -> Result<Credentials, Error> {
+        let mut creds = Credentials(ptr::null_mut());
+        let clnt_princ = CString::new(clnt_princ)?;
+        let serv_princ = CString::new(serv_princ)?;
+        let enc_type = CString::new(enc_type)?;
+        let tkt_flags = CString::new(tkt_flags)?;
+        let start_time = start_time.map(CString::new).transpose()?;
+        let end_time = end_time.map(CString::new).transpose()?;
+        let renew_till = renew_till.map(CString::new).transpose()?;
+
+        let ctx = CONTEXT.get();
+
+        let ret = unsafe {
+            cffi::krbutil_forge_creds(
+                ctx.0,
+                &mut creds.0,
+                clnt_princ.as_ptr(),
+                serv_princ.as_ptr(),
+                enc_type.as_ptr(),
+                tkt_flags.as_ptr(),
+                start_time.as_deref().map_or(ptr::null(), CStr::as_ptr),
+                end_time.as_deref().map_or(ptr::null(), CStr::as_ptr),
+                renew_till.as_deref().map_or(ptr::null(), CStr::as_ptr),
+            )
+        };
+        if ret == 0 {
+            Ok(creds)
+        } else {
+            Err(ret.into())
+        }
+    }
+
+    pub fn fetch(ccache: &str, min_life: Option<&str>, with_crealm: bool) -> Result<Credentials, Error> {
+        let mut creds = Credentials(ptr::null_mut());
+        let ccache = CString::new(ccache)?;
+        let min_life = min_life.map(CString::new).transpose()?;
+
+        let ctx = CONTEXT.get();
+
+        let ret = unsafe {
+            cffi::krbutil_fetch_creds(
+                ctx.0,
+                &mut creds.0,
+                ccache.as_ptr(),
+                min_life.as_deref().map_or(ptr::null(), CStr::as_ptr),
+                with_crealm,
+            )
+        };
+        if ret == 0 {
+            Ok(creds)
+        } else {
+            Err(ret.into())
+        }
+    }
+
     pub fn local_user(&self) -> Result<String, Error> {
         let size = match unistd::sysconf(SysconfVar::LOGIN_NAME_MAX) {
             Ok(Some(n)) => n as usize,

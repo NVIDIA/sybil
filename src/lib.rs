@@ -9,6 +9,8 @@ mod dns;
 mod gss;
 mod krb;
 mod privsep;
+#[cfg(feature = "slurm")]
+mod slurm;
 mod trace;
 
 pub use crate::gss::{DelegatePolicy, Principal};
@@ -20,11 +22,13 @@ use crate::trace::*;
 use futures::prelude::*;
 use nix::{
     errno::Errno,
-    unistd::{Pid, Uid, User},
+    unistd::{Uid, User},
 };
+use privsep::PrivSepChild;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 use std::{
+    ffi::CStr,
     fmt::Display,
     io,
     net::IpAddr,
@@ -34,6 +38,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 use stubborn_io::{ReconnectOptions, StubbornTcpStream};
+#[allow(unused_imports)]
+use syslog_tracing::Syslog;
 use tarpc::{
     client::RpcError,
     context::{self, Context},
@@ -48,11 +54,14 @@ use tokio::{
 };
 use tokio_util::task::TaskTracker;
 use tracing::Instrument;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 const SYBIL_PORT: u16 = 57811;
 const SYBIL_SERVICE: &str = "sybil";
 const SYBIL_SRV_RECORD: &str = "_sybil._tcp";
 const SYBIL_CREDS_STORE: &str = "KCM:";
+#[allow(dead_code)]
+const SYBIL_SYSLOG_IDENT: &CStr = c"sybil";
 
 pub const SYBIL_ENV_CONFIG: &str = "SYBIL_CONFIG";
 pub const SYBIL_ENV_USER: &str = "SYBIL_USER";
@@ -73,6 +82,8 @@ pub enum Error {
     KerberosCreds { source: krb::Error },
     #[snafu(display("Sybil server error"), context(false))]
     SybilServer { source: SybilError },
+    #[snafu(display("Syslog initialization error"))]
+    SyslogInit,
     #[snafu(display("Privilege separation error"), context(false))]
     PrivSep { source: privsep::Error },
 }
@@ -185,7 +196,7 @@ impl Sybil for SybilServer {
         };
 
         tracing::debug!(%user, krbtgt = %princ, "forging kerberos credentials");
-        let creds = krb::forge_credentials(
+        let creds = krb::Credentials::forge(
             user,
             &princ,
             &config().ticket.cipher,
@@ -286,7 +297,7 @@ impl Sybil for SybilServer {
                     .map_err(|err| format!("setgid {gid} failed: {err}"))?;
                 Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid.as_raw()) })
                     .map_err(|err| format!("setuid {uid} failed: {err}"))?;
-                krb::fetch_credentials(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime)).boxed()
+                krb::Credentials::fetch(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime), true).boxed()
             });
             t.join().unwrap().map_err(|err| {
                 tracing::error!(error = err.chain(), "could not fetch credentials");
@@ -510,7 +521,7 @@ impl Client {
             drop(ipc);
             resp.context(privsep::IpcRequest)
         };
-        let (resp, _) = tokio::join!(req, proc.wait());
+        let (resp, _, _) = tokio::join!(req, proc.copy_output(tokio::io::stdout()), proc.wait());
         resp??;
 
         Ok(())
@@ -550,7 +561,7 @@ impl Client {
                     drop(ipc);
                     resp.context(privsep::IpcRequest)
                 };
-                let (resp, _) = tokio::join!(req, proc.wait());
+                let (resp, _, _) = tokio::join!(req, proc.copy_output(tokio::io::stdout()), proc.wait());
                 resp??;
             }
             _ => creds.store()?,
@@ -560,7 +571,11 @@ impl Client {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn fetch_and_refresh(&mut self, uid: Option<u32>, strat: RefreshStrategy) -> Result<Option<Pid>, Error> {
+    pub async fn fetch_and_refresh(
+        &mut self,
+        uid: Option<u32>,
+        strat: RefreshStrategy,
+    ) -> Result<Option<PrivSepChild>, Error> {
         tracing::info!("retrieving kerberos credentials");
         let creds = self.rpc.get_creds(context::current(), uid).await??;
 
@@ -586,14 +601,51 @@ impl Client {
         ipc.refresh_creds(context::current(), lifetime).await?;
 
         match strat {
-            RefreshStrategy::Detach | RefreshStrategy::Daemon => Ok(proc.pid()),
+            RefreshStrategy::Detach | RefreshStrategy::Daemon => Ok(Some(proc)),
             RefreshStrategy::Wait => {
                 drop(ipc);
-                proc.wait().await;
+                tokio::join!(proc.copy_output(tokio::io::stdout()), proc.wait());
                 Ok(None)
             }
         }
     }
+}
+
+#[cfg(not(feature = "slurm"))]
+pub fn setup_logging() -> Result<(), Error> {
+    let layer = if std::env::var(SYBIL_ENV_SYSLOG).is_ok() {
+        fmt::layer()
+            .without_time()
+            .with_level(false)
+            .compact()
+            .with_writer(
+                Syslog::new(SYBIL_SYSLOG_IDENT, Default::default(), Default::default()).ok_or(Error::SyslogInit)?,
+            )
+            .boxed()
+    } else if std::env::var("RUST_LOG_STYLE").is_ok_and(|v| v == "SYSTEMD") {
+        fmt::layer().without_time().compact().boxed()
+    } else {
+        fmt::layer().boxed()
+    };
+
+    tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env())
+        .with(layer)
+        .init();
+
+    Ok(())
+}
+
+#[cfg(feature = "slurm")]
+pub fn setup_logging() -> Result<(), Error> {
+    let layer = fmt::layer().without_time().compact().with_writer(slurm::SpankLogger);
+
+    tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env())
+        .with(layer)
+        .init();
+
+    Ok(())
 }
 
 pub async fn do_privilege_separation() -> Result<(), Error> {

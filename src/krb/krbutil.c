@@ -442,7 +442,11 @@ out_serv:
         return (ret);
 }
 
-krb5_error_code krbutil_fetch_creds(krb5_context ctx, krb5_data **cred_data, const char *ccname, const char *min_life)
+krb5_error_code krbutil_fetch_creds(krb5_context ctx,
+                                    krb5_data **cred_data,
+                                    const char *ccname,
+                                    const char *min_life,
+                                    bool with_crealm)
 {
         krb5_error_code ret;
         krb5_ccache ccache;
@@ -475,7 +479,7 @@ krb5_error_code krbutil_fetch_creds(krb5_context ctx, krb5_data **cred_data, con
         ret = krb5_cc_retrieve_cred(ctx, ccache, KRB5_TC_MATCH_TIMES, &query, &creds);
         goto_out(ret, creds);
 
-        if (strncmp(realm, clnt->realm.data, clnt->realm.length)) {
+        if (with_crealm && strncmp(realm, clnt->realm.data, clnt->realm.length)) {
                 ret = fetch_cross_realm_tgt(ctx, &cr_creds, realm, ccache, &creds, min_life);
                 goto_out(ret, cr_creds);
         }

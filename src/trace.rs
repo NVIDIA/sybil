@@ -35,11 +35,11 @@ impl<T: Debug> DebugOptExt for Option<T> {
 }
 
 pub trait ErrorChainExt {
-    fn chain(&self) -> impl tracing::Value;
+    fn chain(&self) -> String;
 }
 
 impl<T: Error + ?Sized> ErrorChainExt for T {
-    fn chain(&self) -> impl tracing::Value {
+    fn chain(&self) -> String {
         let mut err = String::new();
         let mut src = self.source();
 

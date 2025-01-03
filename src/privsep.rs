@@ -19,10 +19,11 @@ use nix::{
 };
 use snafu::prelude::*;
 use std::{
-    env, io,
+    env,
+    io::{self, Write},
     os::unix::process::ExitStatusExt,
     os::{fd::AsRawFd, fd::FromRawFd, fd::OwnedFd, unix::net::UnixStream as StdUnixStream},
-    process::Stdio,
+    process::{ChildStdout, Stdio},
 };
 use tarpc::{
     client::RpcError,
@@ -32,6 +33,7 @@ use tarpc::{
     tokio_serde::formats::Bincode,
 };
 use tokio::{
+    io::AsyncWrite,
     net::UnixStream,
     process::{Child, Command},
     time::{self, Duration, Instant},
@@ -132,13 +134,14 @@ pub fn spawn_user_process(user: &User, daemonize: bool) -> Result<(PrivSepClient
         .env(SYBIL_ENV_USER, &user.name)
         .current_dir("/")
         .stdin(stdin)
+        .stderr(Stdio::null())
         .uid(user.uid.into())
         .gid(user.gid.into());
 
-    if daemonize || env::var(SYBIL_ENV_SYSLOG).is_ok() {
-        cmd.env(SYBIL_ENV_SYSLOG, "1")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+    if daemonize {
+        cmd.stdout(Stdio::null()).env(SYBIL_ENV_SYSLOG, "1");
+    } else {
+        cmd.stdout(Stdio::piped());
     }
 
     let proc = unsafe {
@@ -178,6 +181,37 @@ impl PrivSepChild {
             ),
             _ => (),
         };
+    }
+
+    pub fn kill(&mut self) {
+        self.0
+            .start_kill()
+            .map_err(|err| tracing::warn!(error = err.chain(), "could not kill user process"))
+            .ok();
+    }
+
+    pub fn copy_output(&mut self, mut output: impl AsyncWrite + Unpin) -> impl Future<Output = ()> {
+        let stdout = self.0.stdout.take();
+
+        async move {
+            if let Some(mut stdout) = stdout {
+                tokio::io::copy(&mut stdout, &mut output).await.ok();
+            }
+        }
+    }
+
+    pub fn copy_output_blocking(&mut self, mut output: impl Write) -> impl FnOnce() {
+        let stdout = self
+            .0
+            .stdout
+            .take()
+            .and_then(|s| s.into_owned_fd().ok().map(ChildStdout::from));
+
+        move || {
+            if let Some(mut stdout) = stdout {
+                io::copy(&mut stdout, &mut output).ok();
+            }
+        }
     }
 
     pub fn pid(&self) -> Option<Pid> {

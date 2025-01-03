@@ -4,8 +4,7 @@
  */
 
 use argh::FromArgs;
-use syslog_tracing::Syslog;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use std::env;
 
 #[derive(FromArgs)]
 /// Sybil client.
@@ -57,40 +56,18 @@ struct FetchArguments {
     daemonize: bool,
 }
 
-fn setup_log(syslog: bool) {
-    let layer = if syslog {
-        let writer = Syslog::new(c"sybil", Default::default(), Default::default()).expect("could not open syslog");
-
-        fmt::layer()
-            .without_time()
-            .with_level(false)
-            .compact()
-            .with_writer(writer)
-            .boxed()
-    } else if std::env::var("RUST_LOG_STYLE").is_ok_and(|v| v == "SYSTEMD") {
-        fmt::layer().without_time().compact().boxed()
-    } else {
-        fmt::layer().boxed()
-    };
-
-    tracing_subscriber::registry()
-        .with(layer)
-        .with(EnvFilter::from_default_env())
-        .init();
-}
-
 #[tokio::main(flavor = "current_thread")]
 #[snafu::report]
 async fn main() -> Result<(), sybil::Error> {
-    setup_log(std::env::var(sybil::SYBIL_ENV_SYSLOG).is_ok());
+    sybil::setup_logging()?;
 
-    if std::env::var(sybil::SYBIL_ENV_USER).is_ok() {
+    if env::var(sybil::SYBIL_ENV_USER).is_ok() {
         return sybil::do_privilege_separation().await;
     }
 
     let main_args: Arguments = argh::from_env();
     if let Some(host) = &main_args.host {
-        std::env::set_var(sybil::SYBIL_ENV_HOST, host);
+        env::set_var(sybil::SYBIL_ENV_HOST, host);
     }
 
     match main_args.command {
@@ -118,7 +95,7 @@ async fn main() -> Result<(), sybil::Error> {
                 } else {
                     sybil::RefreshStrategy::Wait
                 };
-                if let Some(pid) = client.fetch_and_refresh(args.uid, strat).await? {
+                if let Some(pid) = client.fetch_and_refresh(args.uid, strat).await?.and_then(|p| p.pid()) {
                     println!("{pid}");
                 }
             } else {
