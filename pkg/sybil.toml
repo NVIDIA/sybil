@@ -1,5 +1,6 @@
 ########## Client configuration ##########
 binary_path = "/usr/sbin/sybil"
+server_addrs = []
 
 [policy]
 # Force ticket delegation when not explicitly allowed by KDC policy

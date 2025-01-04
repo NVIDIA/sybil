@@ -419,6 +419,15 @@ pub async fn new_client(
         .with_retries_generator(|| vec![Duration::from_secs(1), Duration::from_secs(5), Duration::from_secs(10)]);
 
     let (host, rpc) = match addrs {
+        _ if !config().server_addrs.is_empty() => {
+            let addrs = config().server_addrs.as_slice();
+            tracing::info!(?addrs, "connecting to sybil server");
+            let stream = StubbornTcpStream::connect_with_options(addrs, retries).await?;
+            let host = dns::lookup_address(&stream.deref().peer_addr()?.ip()).await?;
+            let transport = Transport::from((stream, Bincode::default()));
+            let rpc = SybilClient::new(Default::default(), transport).spawn();
+            (host, rpc)
+        }
         Some(addrs) => {
             tracing::info!(%addrs, "connecting to sybil server");
             let stream = StubbornTcpStream::connect_with_options(addrs, retries).await?;

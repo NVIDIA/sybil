@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use std::{
     env, fmt,
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::OnceLock,
 };
@@ -66,6 +67,7 @@ pub struct Policy {
 #[serde(default)]
 pub struct Config {
     pub binary_path: PathBuf,
+    pub server_addrs: Vec<SocketAddr>,
     pub policy: Policy,
     pub ticket: Ticket,
     pub acl: Vec<Acl>,
@@ -75,6 +77,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             binary_path: option_env!("PREFIX").map_or("/".as_ref(), Path::new).join("sbin/sybil"),
+            server_addrs: Default::default(),
             policy: Default::default(),
             ticket: Default::default(),
             acl: Default::default(),
@@ -132,13 +135,18 @@ pub fn config() -> &'static Config {
             conf = conf.add_source(src);
         }
 
-        conf.add_source(config::Environment::with_prefix("SYBIL"))
-            .build()
-            .and_then(config::Config::try_deserialize)
-            .unwrap_or_else(|err| {
-                tracing::warn!(error = err.chain(), "could not load configuration");
-                Config::default()
-            })
+        conf.add_source(
+            config::Environment::with_prefix("SYBIL")
+                .try_parsing(true)
+                .list_separator(",")
+                .with_list_parse_key("server_addrs"),
+        )
+        .build()
+        .and_then(config::Config::try_deserialize)
+        .unwrap_or_else(|err| {
+            tracing::warn!(error = err.chain(), "could not load configuration");
+            Config::default()
+        })
     })
 }
 
