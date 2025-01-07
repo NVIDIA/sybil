@@ -22,19 +22,19 @@ use crate::trace::*;
 use futures::prelude::*;
 use nix::{
     errno::Errno,
-    unistd::{Uid, User},
+    unistd::{Gid, Uid, User},
 };
 use privsep::PrivSepChild;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 use std::{
+    error::Error as StdError,
     ffi::CStr,
     fmt::Display,
     io,
     net::IpAddr,
     ops::{Deref, DerefMut},
     sync::Arc,
-    thread,
     time::{Duration, SystemTime},
 };
 use stubborn_io::{ReconnectOptions, StubbornTcpStream};
@@ -141,6 +141,26 @@ pub enum RefreshStrategy {
     Daemon,
 }
 
+fn with_privileges<T, F>(uid: Uid, gid: Gid, func: F) -> Result<T, Box<dyn StdError + Send + Sync>>
+where
+    F: FnOnce() -> Result<T, Box<dyn StdError + Send + Sync>>,
+{
+    let (old_uid, old_gid) = (Uid::current(), Gid::current());
+
+    Errno::result(unsafe { libc::syscall(libc::SYS_setresgid, gid.as_raw(), gid.as_raw(), -1) })
+        .map_err(|err| format!("setresgid {gid} failed: {err}"))?;
+    Errno::result(unsafe { libc::syscall(libc::SYS_setresuid, uid.as_raw(), uid.as_raw(), -1) })
+        .map_err(|err| format!("setresuid {uid} failed: {err}"))?;
+
+    let res = func();
+
+    Errno::result(unsafe { libc::syscall(libc::SYS_setresgid, old_gid.as_raw(), old_gid.as_raw(), -1) })
+        .expect("could not restore privileges: setresgid {old_gid} failed");
+    Errno::result(unsafe { libc::syscall(libc::SYS_setresuid, old_uid.as_raw(), old_uid.as_raw(), -1) })
+        .expect("could not restore privileges: setresuid {old_uid} failed");
+    res
+}
+
 impl Sybil for SybilServer {
     async fn gss_init(self, _: Context, token: gss::Token) -> Result<Option<gss::Token>, SybilError> {
         tracing::debug!("performing GSS negotiation step");
@@ -244,20 +264,14 @@ impl Sybil for SybilServer {
         // XXX: Should we enforce that the delegated credentials matches our principal?
 
         tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "storing delegated credentials");
-        thread::scope(|s| {
-            let t = s.spawn(|| {
-                Errno::result(unsafe { libc::syscall(libc::SYS_setgid, gid.as_raw()) })
-                    .map_err(|err| format!("setgid {gid} failed: {err}"))?;
-                Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid.as_raw()) })
-                    .map_err(|err| format!("setuid {uid} failed: {err}"))?;
-                creds
-                    .store(SYBIL_CREDS_STORE, true, true, CredUsage::Initiate, Some(MECH))
-                    .boxed()
-            });
-            t.join().unwrap().map_err(|err| {
-                tracing::error!(error = err.chain(), "could not store credentials");
-                SybilError::CredsStore
-            })
+        with_privileges(uid, gid, || {
+            creds
+                .store(SYBIL_CREDS_STORE, true, true, CredUsage::Initiate, Some(MECH))
+                .boxed()
+        })
+        .map_err(|err| {
+            tracing::error!(error = err.chain(), "could not store credentials");
+            SybilError::CredsStore
         })
     }
 
@@ -293,18 +307,12 @@ impl Sybil for SybilServer {
         };
 
         tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "fetching kerberos credentials");
-        let creds = thread::scope(|s| {
-            let t = s.spawn(|| {
-                Errno::result(unsafe { libc::syscall(libc::SYS_setgid, gid.as_raw()) })
-                    .map_err(|err| format!("setgid {gid} failed: {err}"))?;
-                Errno::result(unsafe { libc::syscall(libc::SYS_setuid, uid.as_raw()) })
-                    .map_err(|err| format!("setuid {uid} failed: {err}"))?;
-                krb::Credentials::fetch(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime), true).boxed()
-            });
-            t.join().unwrap().map_err(|err| {
-                tracing::error!(error = err.chain(), "could not fetch credentials");
-                SybilError::CredsStore
-            })
+        let creds = with_privileges(uid, gid, || {
+            krb::Credentials::fetch(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime), true).boxed()
+        })
+        .map_err(|err| {
+            tracing::error!(error = err.chain(), "could not fetch credentials");
+            SybilError::CredsFetch
         })?;
 
         // XXX: Should we enforce that the fetched credentials matches our UID?
