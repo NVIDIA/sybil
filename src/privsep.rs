@@ -122,7 +122,7 @@ pub fn spawn_user_process_from_uid(uid: Uid, daemonize: bool) -> Result<(PrivSep
 pub fn spawn_user_process(user: &User, daemonize: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
     let ppid = Pid::this();
     let env: Vec<(String, String)> = env::vars()
-        .filter(|(v, _)| v == "RUST_LOG" || v == "KRB5_TRACE" || v.starts_with("SYBIL_"))
+        .filter(|(v, _)| v.starts_with("RUST_LOG") || v.starts_with("KRB5") || v.starts_with("SYBIL_"))
         .collect();
 
     tracing::debug!(user = %user.name, "spawning user process");
@@ -170,20 +170,24 @@ pub struct PrivSepChild(Child);
 impl PrivSepChild {
     pub async fn wait(&mut self) {
         match self.0.wait().await {
+            Ok(status) if !status.success() && status.code().is_some() => {
+                tracing::warn!(
+                    code = status.code().unwrap(),
+                    "user process terminated with non-zero status"
+                );
+            }
+            Ok(status) if !status.success() && status.code().is_none() => match status.signal() {
+                Some(15) if cfg!(feature = "slurm") => (),
+                Some(signal) => tracing::warn!(signal, "user process terminated with a signal"),
+                _ => (),
+            },
             Err(err) => tracing::warn!(error = err.chain(), "could not wait on user process"),
-            Ok(status) if !status.success() && status.code().is_some() => tracing::warn!(
-                status = status.code().unwrap(),
-                "user process terminated with non-zero status"
-            ),
-            Ok(status) if !status.success() && status.code().is_none() => tracing::warn!(
-                signal = status.signal().unwrap(),
-                "user process terminated with a signal"
-            ),
             _ => (),
         };
     }
 
     pub fn kill(&mut self) {
+        tracing::debug!(pid = self.pid().display(), "killing user process");
         self.0
             .start_kill()
             .map_err(|err| tracing::warn!(error = err.chain(), "could not kill user process"))
@@ -221,7 +225,7 @@ impl PrivSepChild {
 
 #[tracing::instrument(fields(user = env::var(SYBIL_ENV_USER).unwrap()))]
 pub async fn serve_user_process() -> Result<(), Error> {
-    tracing::debug!("serving user process");
+    tracing::debug!(pid = %Pid::this(), "serving user process");
     let stdin = unsafe { StdUnixStream::from_raw_fd(io::stdin().as_raw_fd()) };
     let transport = UnixStream::from_std(stdin)
         .map(|s| Transport::from((s, Bincode::default())))
@@ -242,6 +246,6 @@ pub async fn serve_user_process() -> Result<(), Error> {
     proc.tasks.close();
     proc.tasks.wait().await;
 
-    tracing::debug!("stopping user process");
+    tracing::debug!(pid = %Pid::this(), "stopping user process");
     Ok(())
 }

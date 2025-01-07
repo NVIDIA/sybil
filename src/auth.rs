@@ -64,12 +64,12 @@ impl Identity {
 
 #[rustfmt::skip]
 pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Permissions) -> Option<Identity> {
-    tracing::debug!(%perms, "performing authorization checks");
-
     let principal = gss.source_principal().map_or_else(
         |err| { tracing::error!(error = err.chain(), "could not retrieve source principal"); None },
         Into::into,
     )?;
+
+    tracing::debug!(%perms, %principal, "performing authorization checks");
 
     let user = gss.source_username().map_or_else(
         |err| { tracing::debug!(error = err.chain(), "could not retrieve source username"); None },

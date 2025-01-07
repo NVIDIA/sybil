@@ -5,17 +5,26 @@
 
 use crate::trace::*;
 
-use std::{cell::Cell, result::Result};
+use std::{cell::Cell, error::Error, result::Result};
 use tracing_subscriber::fmt::MakeWriter;
 
 thread_local! {
     static REFRESH_PROCESS: Cell<Option<crate::PrivSepChild>> = const { Cell::new(None) };
 }
 
-pub async fn store_credentials(min_tkt_lifetime: Option<&str>) -> Result<(), crate::Error> {
+pub async fn store_credentials(min_tkt_lifetime: Option<&str>) -> Result<(), Box<dyn Error>> {
     if min_tkt_lifetime.is_some_and(|v| !v.is_empty() && v != "0") {
-        let ccache = crate::krb::default_ccache()?;
-        let _ = crate::krb::Credentials::fetch(&ccache, min_tkt_lifetime, false)?;
+        crate::krb::default_ccache()
+            .and_then(|ccache| crate::krb::Credentials::fetch(&ccache, min_tkt_lifetime, false))
+            .map_err(|err| {
+                tracing::error!(
+                    error = err.chain(),
+                    lifetime = min_tkt_lifetime.display(),
+                    "minimum ticket lifetime requirement not met"
+                );
+                "Kerberos credentials do not meet the required freshness policy, \
+                please re-authenticate before submitting this job again"
+            })?;
     }
 
     let mut client = crate::new_client(None::<String>, None, crate::DelegatePolicy::ForceDelegate).await?;
@@ -24,7 +33,7 @@ pub async fn store_credentials(min_tkt_lifetime: Option<&str>) -> Result<(), cra
     Ok(())
 }
 
-pub async fn fetch_credentials(uid: u32) -> Result<(), crate::Error> {
+pub async fn fetch_credentials(uid: u32) -> Result<(), Box<dyn Error>> {
     let mut client = crate::new_client(None::<String>, None, crate::DelegatePolicy::None).await?;
     client.authenticate().await?;
 

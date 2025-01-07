@@ -89,7 +89,7 @@ trait SpankErrorExt {
     fn defer(&self) -> SpankError;
 }
 
-impl<E: Error> SpankErrorExt for E {
+impl<E: Error + ?Sized> SpankErrorExt for E {
     fn fatal(&self) -> SpankError {
         SpankError::Fatal(self.chain())
     }

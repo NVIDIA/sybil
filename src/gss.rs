@@ -24,10 +24,10 @@ pub enum Error {
     InvalidPrincipal { princ: String, source: GssError },
     #[snafu(display("Failed to decode principal"))]
     DecodePrincipal { source: FromUtf8Error },
-    #[snafu(display("Failed to acquire host credentials"))]
-    BadHostCreds { source: GssError },
+    #[snafu(display("Failed to acquire credentials"))]
+    BadCreds { source: GssError },
     #[snafu(display("Failed to acquire credentials for `{princ}`"))]
-    BadUserCreds { princ: String, source: GssError },
+    BadS4UCreds { princ: String, source: GssError },
     #[snafu(display("Generic GSS failure"), context(false))]
     Generic { source: GssError },
 }
@@ -138,7 +138,7 @@ pub fn new_client_ctx(
         })?;
 
     tracing::debug!(target = %serv_princ, "initializing GSS context");
-    let mut cred = Cred::acquire(None, None, CredUsage::Initiate, Some(&mechs)).context(BadHostCreds)?;
+    let mut cred = Cred::acquire(None, None, CredUsage::Initiate, Some(&mechs)).context(BadCreds)?;
 
     if let Some(clnt_princ) = clnt_princ {
         let clnt_princ = Name::new(
@@ -152,7 +152,7 @@ pub fn new_client_ctx(
         tracing::debug!(principal = %clnt_princ, "impersonating principal");
         cred = cred
             .impersonate(&clnt_princ, None, CredUsage::Initiate, Some(&mechs))
-            .context(BadUserCreds {
+            .context(BadS4UCreds {
                 princ: clnt_princ.to_string(),
             })?;
     }

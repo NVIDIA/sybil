@@ -98,12 +98,14 @@ pub enum SybilError {
     GssHandshake,
     #[snafu(display("Error while encrypting communication"))]
     GssEncrypt,
-    #[snafu(display("Error while retrieving delegated credentials"))]
+    #[snafu(display("Error while looking up delegated credentials"))]
     GssDelegate,
-    #[snafu(display("Error while generating kerberos credentials"))]
-    KerberosCreds,
-    #[snafu(display("Error while handling credentials storage"))]
+    #[snafu(display("Error while generating credentials"))]
+    CredsGenerate,
+    #[snafu(display("Error while storing credentials"))]
     CredsStore,
+    #[snafu(display("Error while retrieving credentials"))]
+    CredsFetch,
     #[snafu(display("Requested user not found"))]
     UserNotFound,
 }
@@ -167,18 +169,18 @@ impl Sybil for SybilServer {
         })?;
         let realm = krb::default_realm().map_err(|err| {
             tracing::error!(error = err.chain(), "could not retrieve default realm");
-            SybilError::KerberosCreds
+            SybilError::CredsGenerate
         })?;
 
         let target_user = krb::local_user(user).map_err(|err| {
             tracing::error!(error = err.chain(), principal = %format!("{user}@{realm}"), "could not find user for principal");
-            SybilError::KerberosCreds
+            SybilError::CredsGenerate
         })?;
         match (User::from_name(&target_user), id.username(false)) {
             (Ok(Some(target)), Some(username)) if target.name == username => (),
             _ => {
                 tracing::error!(%user, %realm, "translation mismatch for user principal in realm");
-                return Err(SybilError::KerberosCreds);
+                return Err(SybilError::CredsGenerate);
             }
         }
 
@@ -207,7 +209,7 @@ impl Sybil for SybilServer {
         )
         .map_err(|err| {
             tracing::error!(error = err.chain(), %user, "could not forge credentials");
-            SybilError::KerberosCreds
+            SybilError::CredsGenerate
         })?;
 
         tracing::debug!("encrypting kerberos credentials");
@@ -631,7 +633,7 @@ pub fn setup_logging() -> Result<(), Error> {
                 Syslog::new(SYBIL_SYSLOG_IDENT, Default::default(), Default::default()).ok_or(Error::SyslogInit)?,
             )
             .boxed()
-    } else if std::env::var("RUST_LOG_STYLE").is_ok_and(|v| v == "SYSTEMD") {
+    } else if std::env::var("RUST_LOG_STYLE").is_ok_and(|v| v == "systemd" || v == "slurm") {
         fmt::layer().without_time().compact().boxed()
     } else {
         fmt::layer().boxed()
