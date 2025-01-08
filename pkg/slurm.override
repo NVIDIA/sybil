@@ -1,0 +1,6 @@
+[Service]
+Environment="KRB5_CLIENT_KTNAME=/etc/krb5.keytab"
+Environment="SYBIL_LOG=sybil=error"
+Environment="SYBIL_LOG_STYLE=slurm"
+#Environment="SYBIL_BINARY=/usr/sbin/sybil"
+#Environment="SYBIL_CONFIG=/etc/sybil.toml"
