@@ -85,7 +85,7 @@ pub fn new_server_ctx(serv_princ: Principal) -> Result<ServerCtx, Error> {
     tracing::debug!(source = %serv_princ, "initializing GSS context");
     let cred = Cred::acquire(Some(&serv_princ), None, CredUsage::Accept, Some(&mechs))?;
 
-    Ok(ServerCtx::new(cred))
+    Ok(ServerCtx::new(cred.into()))
 }
 
 fn principal_realm_to_upper(princ: &Principal) -> String {
@@ -157,7 +157,7 @@ pub fn new_client_ctx(
             })?;
     }
 
-    Ok(ClientCtx::new(Some(cred), serv_princ, flags, Some(MECH)))
+    Ok(ClientCtx::new(cred.into(), serv_princ, flags, Some(MECH)))
 }
 
 pub trait SecurityContextExt {
