@@ -235,7 +235,7 @@ impl PrivSepChild {
     }
 }
 
-#[tracing::instrument(fields(user = env::var(SYBIL_ENV_USER).unwrap()))]
+#[tracing::instrument(fields(user = env::var(SYBIL_ENV_USER).ok().display()))]
 pub async fn serve_user_process() -> Result<(), Error> {
     tracing::debug!(pid = %Pid::this(), "serving user process");
     let stdin = unsafe { StdUnixStream::from_raw_fd(io::stdin().as_raw_fd()) };

@@ -68,6 +68,8 @@ pub const SYBIL_ENV_USER: &str = "SYBIL_USER";
 pub const SYBIL_ENV_HOST: &str = "SYBIL_HOST";
 pub const SYBIL_ENV_SYSLOG: &str = "SYBIL_SYSLOG";
 pub const SYBIL_ENV_BINARY: &str = "SYBIL_BINARY";
+pub const SYBIL_ENV_LOG: &str = "SYBIL_LOG";
+pub const SYBIL_ENV_LOG_STYLE: &str = "SYBIL_LOG_STYLE";
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -642,14 +644,14 @@ pub fn setup_logging() -> Result<(), Error> {
                 Syslog::new(SYBIL_SYSLOG_IDENT, Default::default(), Default::default()).ok_or(Error::SyslogInit)?,
             )
             .boxed()
-    } else if std::env::var("RUST_LOG_STYLE").is_ok_and(|v| v == "systemd" || v == "slurm") {
+    } else if std::env::var(SYBIL_ENV_LOG_STYLE).is_ok_and(|v| v == "systemd" || v == "slurm") {
         fmt::layer().without_time().compact().boxed()
     } else {
         fmt::layer().boxed()
     };
 
     tracing_subscriber::registry()
-        .with(EnvFilter::from_default_env())
+        .with(EnvFilter::builder().with_env_var(SYBIL_ENV_LOG).from_env_lossy())
         .with(layer)
         .init();
 
@@ -661,7 +663,7 @@ pub fn setup_logging() -> Result<(), Error> {
     let layer = fmt::layer().without_time().compact().with_writer(slurm::SpankLogger);
 
     tracing_subscriber::registry()
-        .with(EnvFilter::from_default_env())
+        .with(EnvFilter::builder().with_env_var(SYBIL_ENV_LOG).from_env_lossy())
         .with(layer)
         .init();
 
