@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::conf::config;
 use crate::krb;
 use crate::trace::*;
-use crate::{SYBIL_ENV_HOST, SYBIL_ENV_SYSLOG, SYBIL_ENV_USER};
+use crate::{SYBIL_ENV_BINARY, SYBIL_ENV_HOST, SYBIL_ENV_SYSLOG, SYBIL_ENV_USER};
 
 use futures::prelude::*;
 use nix::{
@@ -23,6 +22,7 @@ use std::{
     io::{self, Write},
     os::unix::process::ExitStatusExt,
     os::{fd::AsRawFd, fd::FromRawFd, fd::OwnedFd, unix::net::UnixStream as StdUnixStream},
+    path::{Path, PathBuf},
     process::{ChildStdout, Stdio},
 };
 use tarpc::{
@@ -128,7 +128,19 @@ pub fn spawn_user_process(user: &User, daemonize: bool) -> Result<(PrivSepClient
     tracing::debug!(user = %user.name, "spawning user process");
     let (stream, ustream) = UnixStream::pair()?;
     let stdin: OwnedFd = stream.into_std()?.into();
-    let mut cmd = Command::new(&config().binary_path);
+    let exe = if cfg!(feature = "slurm") {
+        env::var(SYBIL_ENV_BINARY).map_or_else(
+            |_| {
+                option_env!("PREFIX")
+                    .map_or("/usr".as_ref(), Path::new)
+                    .join("sbin/sybil")
+            },
+            PathBuf::from,
+        )
+    } else {
+        env::current_exe()?
+    };
+    let mut cmd = Command::new(exe);
     cmd.env_clear()
         .envs(env)
         .env(SYBIL_ENV_USER, &user.name)

@@ -67,6 +67,7 @@ pub const SYBIL_ENV_CONFIG: &str = "SYBIL_CONFIG";
 pub const SYBIL_ENV_USER: &str = "SYBIL_USER";
 pub const SYBIL_ENV_HOST: &str = "SYBIL_HOST";
 pub const SYBIL_ENV_SYSLOG: &str = "SYBIL_SYSLOG";
+pub const SYBIL_ENV_BINARY: &str = "SYBIL_BINARY";
 
 #[derive(Debug, Snafu)]
 pub enum Error {

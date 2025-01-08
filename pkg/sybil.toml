@@ -1,5 +1,4 @@
 ########## Client configuration ##########
-binary_path = "/usr/sbin/sybil"
 server_addrs = []
 
 [policy]

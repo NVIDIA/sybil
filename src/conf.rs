@@ -10,12 +10,7 @@ use netaddr2::NetAddr;
 use regex_lite::Regex;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
-use std::{
-    env, fmt,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    sync::OnceLock,
-};
+use std::{env, fmt, net::SocketAddr, path::Path, sync::OnceLock};
 
 const DEFAULT_TKT_CIPHER: &str = "aes256-sha1";
 const DEFAULT_TKT_FLAGS: &str = "FR";
@@ -63,26 +58,13 @@ pub struct Policy {
     pub force_delegate: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub binary_path: PathBuf,
     pub server_addrs: Vec<SocketAddr>,
     pub policy: Policy,
     pub ticket: Ticket,
     pub acl: Vec<Acl>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            binary_path: option_env!("PREFIX").map_or("/".as_ref(), Path::new).join("sbin/sybil"),
-            server_addrs: Default::default(),
-            policy: Default::default(),
-            ticket: Default::default(),
-            acl: Default::default(),
-        }
-    }
 }
 
 impl Default for Ticket {
