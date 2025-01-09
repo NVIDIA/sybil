@@ -117,7 +117,7 @@ static krb5_error_code parse_time(const char *str,
                 if (ret || *time == 0)
                         return (ret ? ret : KRB5_DELTAT_BADFORMAT);
         } else
-                *time = now + delta;
+                *time = (krb5_timestamp)((uint32_t)now + (uint32_t)delta);
         return (0);
 }
 
@@ -339,7 +339,7 @@ krb5_error_code krbutil_lifetime_creds(krb5_context ctx, time_t *lifetime, const
         ret = krb5_rd_cred(ctx, auth, (krb5_data *)cred_data, &creds, NULL);
         goto_out(ret, creds);
 
-        *lifetime = (time_t)creds[0]->times.endtime;
+        *lifetime = (time_t)(uint32_t)creds[0]->times.endtime;
 
         for (size_t i = 0; creds[i] != NULL; ++i) {
                 explicit_bzero(creds[i]->ticket.data, creds[i]->ticket.length);
