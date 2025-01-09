@@ -312,6 +312,21 @@ impl Credentials {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn will_last_for(&self, lifetime: &str) -> Result<bool, Error> {
+        let lifetime = CString::new(lifetime)?;
+        let mut renewable = false;
+        let ctx = CONTEXT.get();
+
+        assert!(!self.0.is_null());
+        let ret = unsafe { cffi::krbutil_lasting_creds(ctx.0, lifetime.as_ptr(), &mut renewable, self.0) };
+        if ret == 0 {
+            Ok(renewable)
+        } else {
+            Err(ret.into())
+        }
+    }
+
     pub fn store(&self) -> Result<(), Error> {
         let ctx = CONTEXT.get();
 

@@ -352,6 +352,42 @@ out_auth:
         return (ret);
 }
 
+krb5_error_code krbutil_lasting_creds(krb5_context ctx, const char *lifetime, bool *will_last, const krb5_data *cred_data)
+{
+        krb5_error_code ret;
+        krb5_timestamp now;
+        krb5_timestamp deadline;
+        krb5_auth_context auth;
+        krb5_creds **creds;
+
+        ret = krb5_timeofday(ctx, &now);
+        goto_out(ret);
+        ret = parse_time(lifetime, now, &deadline);
+        goto_out(ret);
+
+        ret = krb5_auth_con_init(ctx, &auth);
+        goto_out(ret, auth);
+        krb5_auth_con_setflags(ctx, auth, 0);
+        ret = krb5_rd_cred(ctx, auth, (krb5_data *)cred_data, &creds, NULL);
+        goto_out(ret, creds);
+
+        if ((uint32_t)creds[0]->times.renew_till >= (uint32_t)deadline)
+                *will_last = true;
+        else
+                *will_last = false;
+
+        for (size_t i = 0; creds[i] != NULL; ++i) {
+                explicit_bzero(creds[i]->ticket.data, creds[i]->ticket.length);
+                explicit_bzero(creds[i]->keyblock.contents, creds[i]->keyblock.length);
+        }
+        krb5_free_tgt_creds(ctx, creds);
+out_creds:
+        krb5_auth_con_free(ctx, auth);
+out_auth:
+out:
+        return (ret);
+}
+
 krb5_error_code krbutil_store_creds(krb5_context ctx, const krb5_data *cred_data)
 {
         krb5_error_code ret;

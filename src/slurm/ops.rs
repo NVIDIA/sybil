@@ -13,18 +13,29 @@ thread_local! {
 }
 
 pub async fn store_credentials(min_tkt_lifetime: Option<&str>) -> Result<(), Box<dyn Error>> {
-    if min_tkt_lifetime.is_some_and(|v| !v.is_empty() && v != "0") {
-        crate::krb::default_ccache()
-            .and_then(|ccache| crate::krb::Credentials::fetch(&ccache, min_tkt_lifetime, false))
-            .map_err(|err| {
+    let creds = crate::krb::default_ccache()
+        .and_then(|ccache| crate::krb::Credentials::fetch(&ccache, Some("5m"), false))
+        .map_err(|err| {
+            tracing::error!(error = err.chain(), "could not find active credentials");
+            "Kerberos credentials not found, make sure that `klist` shows active tickets"
+        })?;
+
+    if min_tkt_lifetime.is_some_and(|l| !l.is_empty() && l != "0") {
+        creds
+            .will_last_for(min_tkt_lifetime.unwrap())
+            .unwrap_or_else(|err| {
                 tracing::error!(
                     error = err.chain(),
                     lifetime = min_tkt_lifetime.display(),
-                    "minimum ticket lifetime requirement not met"
+                    "could not evaluate minimum ticket lifetime requirement"
                 );
+                false
+            })
+            .then_some(())
+            .ok_or(
                 "Kerberos credentials do not meet the required freshness policy, \
-                please re-authenticate before submitting this job again"
-            })?;
+                    you must re-authenticate before submitting this job",
+            )?;
     }
 
     let mut client = crate::new_client(None::<String>, None, crate::DelegatePolicy::ForceDelegate).await?;
