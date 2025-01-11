@@ -1,23 +1,32 @@
 export SLURM_VERSION ?= 24.11
+export TARGET ?= $(shell rustc -vV | awk '/host/{print $$2}')
 
 check:
 	cargo clippy --all-features
 
 debug:
-	cargo build
-	[ "$$WITH_SLURM" = "1" ] && cargo rustc --lib --crate-type=cdylib --features slurm ||:
+	cargo build --target $(TARGET)
+ifdef WITH_SLURM
+	cargo rustc --target $(TARGET) --lib --crate-type=cdylib --features slurm
+endif
 
 release:
-	cargo build --release
-	[ "$$WITH_SLURM" = "1" ] && cargo rustc --release --lib --crate-type=cdylib --features slurm ||:
+	cargo build --target $(TARGET) --release
+ifdef WITH_SLURM
+	cargo rustc --target $(TARGET) --release --lib --crate-type=cdylib --features slurm
+endif
 
-deb: export WITH_SLURM := 1
 deb: release
-	cargo deb --no-build
+	cargo deb --target $(TARGET) --no-build --multiarch foreign
+ifdef WITH_SLURM
+	cargo deb --target $(TARGET) --no-build --multiarch foreign --variant spank
+endif
 
-rpm: export WITH_SLURM := 1
 rpm: release
-	cargo generate-rpm
+	cargo generate-rpm --target $(TARGET)
+ifdef WITH_SLURM
+	cargo generate-rpm --target $(TARGET) --variant spank
+endif
 
 clean:
 	cargo clean

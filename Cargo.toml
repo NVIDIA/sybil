@@ -66,17 +66,22 @@ depends = [
     "libgssapi-krb5-2 (>= 1.19)",
 ]
 assets = [
-  ["target/release/sybil", "/usr/sbin/sybil", "755"],
-  ["target/release/sybild", "/usr/sbin/sybild", "755"],
-  ["target/release/libsybil.so", "/usr/lib/slurm/spank_sybil.so", "644"],
-  ["pkg/sybil.toml", "/etc/sybil.toml", "644"],
-  ["pkg/sybil.env", "/etc/default/sybil", "644"],
-  ["pkg/slurm.override", "/lib/systemd/system/slurmd.service.d/sybil.conf", "644"],
+  ["target/release/sybil", "usr/sbin/sybil", "755"],
+  ["target/release/sybild", "usr/sbin/sybild", "755"],
+  ["pkg/sybil.toml", "etc/sybil.toml", "644"],
+  ["pkg/sybil.env", "etc/default/sybil", "644"],
 ]
 conf-files = [
-    "/etc/sybil.toml",
-    "/etc/default/sybil",
-    "/lib/systemd/system/slurmd.service.d/sybil.conf"
+    "etc/sybil.toml",
+    "etc/default/sybil",
+]
+
+[package.metadata.deb.variants.spank]
+depends = [ "sybil (>= 2.0)" ]
+assets = [
+  ["target/release/libsybil.so", "usr/lib/slurm/spank_sybil.so", "644"],
+  ["pkg/slurmd.conf", "usr/share/sybil/slurm/slurmd.conf", "644"],
+  ["pkg/plugstack.conf", "usr/share/sybil/slurm/plugstack.conf", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -86,8 +91,15 @@ assets = [
   {source = "pkg/rpm/sybil.service", dest = "/lib/systemd/system/sybil.service", mode = "644"},
   {source = "target/release/sybil", dest = "/usr/sbin/sybil", mode = "755"},
   {source = "target/release/sybild", dest = "/usr/sbin/sybild", mode = "755"},
-  {source = "target/release/libsybil.so", dest = "/usr/lib64/slurm/spank_sybil.so", mode = "644"},
   {source = "pkg/sybil.toml", dest = "/etc/sybil.toml", mode = "644", config = true},
   {source = "pkg/sybil.env", dest = "/etc/sysconfig/sybil", mode = "644", config = true},
-  {source = "pkg/slurm.override", dest = "/lib/systemd/system/slurmd.service.d/sybil.conf", mode = "644", config = true},
+]
+
+[package.metadata.generate-rpm.variants.spank]
+name = "sybil-spank"
+requires = { sybil = ">= 2.0" }
+assets = [
+  {source = "target/release/libsybil.so", dest = "/usr/lib64/slurm/spank_sybil.so", mode = "644"},
+  {source = "pkg/slurmd.conf", dest = "/usr/share/sybil/slurm/slurmd.conf", mode = "644"},
+  {source = "pkg/plugstack.conf", dest = "/usr/share/sybil/slurm/plugstack.conf", mode = "644"},
 ]
