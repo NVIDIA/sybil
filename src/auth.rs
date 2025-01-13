@@ -16,9 +16,10 @@ bitflags! {
     #[derive(Default, Clone)]
     pub struct Permissions : u32 {
         const KINIT      = 1;
-        const READ       = 1 << 1;
-        const WRITE      = 1 << 2;
-        const MASQUERADE = 1 << 3;
+        const LIST       = 1 << 1;
+        const READ       = 1 << 2;
+        const WRITE      = 1 << 3;
+        const MASQUERADE = 1 << 4;
     }
 }
 
@@ -32,6 +33,7 @@ impl From<&conf::Permissions> for Permissions {
     fn from(perms: &conf::Permissions) -> Self {
         Self::default()
             | perms.kinit.then_some(Self::KINIT).unwrap_or_default()
+            | perms.list.then_some(Self::LIST).unwrap_or_default()
             | perms.read.then_some(Self::READ).unwrap_or_default()
             | perms.write.then_some(Self::WRITE).unwrap_or_default()
             | perms.masquerade.then_some(Self::MASQUERADE).unwrap_or_default()
@@ -74,14 +76,14 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
     let user = gss.source_username().map_or_else(
         |err| { tracing::debug!(error = err.chain(), "could not retrieve source username"); None },
         |username| match User::from_name(&username) {
-            Err(_) | Ok(None) => { tracing::debug!(%username, "could not lookup user"); None },
+            Err(_) | Ok(None) => { tracing::error!(%username, "could not lookup user"); None },
             Ok(user) => user,
         },
     );
 
     let groups = user.as_ref().and_then(|u| {
         unistd::getgrouplist(&CString::new(u.name.as_str()).unwrap(), u.gid).map_or_else(
-            |err| { tracing::debug!(error = err.chain(), username = %u.name, "could not lookup groups"); None },
+            |err| { tracing::error!(error = err.chain(), username = %u.name, "could not lookup groups"); None },
             |groups| Some(
                 groups
                     .into_iter()

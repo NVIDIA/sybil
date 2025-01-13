@@ -17,7 +17,7 @@ krb5_error_code krbutil_forge_creds(krb5_context, krb5_data **, const char *, co
                                     __attribute__((nonnull(2,3,4,5,6)));
 krb5_error_code krbutil_local_user(krb5_context, char *, size_t, const char *)  __attribute__((nonnull(2,4)));
 krb5_error_code krbutil_local_user_creds(krb5_context, char *, size_t, const krb5_data *)  __attribute__((nonnull(2,4)));
-krb5_error_code krbutil_lifetime_creds(krb5_context, time_t *, const krb5_data *)  __attribute__((nonnull(2,3)));
+krb5_error_code krbutil_info_creds(krb5_context, krb5_principal *, krb5_ticket_times *, const krb5_data *)  __attribute__((nonnull(2,3,4)));
 krb5_error_code krbutil_lasting_creds(krb5_context, const char *, bool *, const krb5_data *)  __attribute__((nonnull(2,3,4)));
 krb5_error_code krbutil_store_creds(krb5_context, const krb5_data *) __attribute__((nonnull(2)));
 krb5_error_code krbutil_fetch_creds(krb5_context, krb5_data **, const char *, const char *, bool) __attribute__((nonnull(3)));

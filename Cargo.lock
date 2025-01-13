@@ -1886,6 +1886,7 @@ dependencies = [
  "bindgen",
  "bitflags",
  "cc",
+ "chrono",
  "close_fds",
  "config",
  "futures",

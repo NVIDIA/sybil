@@ -327,7 +327,7 @@ out_auth:
         return (ret);
 }
 
-krb5_error_code krbutil_lifetime_creds(krb5_context ctx, time_t *lifetime, const krb5_data *cred_data)
+krb5_error_code krbutil_info_creds(krb5_context ctx, krb5_principal *princ, krb5_ticket_times *times, const krb5_data *cred_data)
 {
         krb5_error_code ret;
         krb5_auth_context auth;
@@ -339,7 +339,8 @@ krb5_error_code krbutil_lifetime_creds(krb5_context ctx, time_t *lifetime, const
         ret = krb5_rd_cred(ctx, auth, (krb5_data *)cred_data, &creds, NULL);
         goto_out(ret, creds);
 
-        *lifetime = (time_t)(uint32_t)creds[0]->times.endtime;
+        *times = creds[0]->times;
+        ret = krb5_copy_principal(ctx, creds[0]->client, princ);
 
         for (size_t i = 0; creds[i] != NULL; ++i) {
                 explicit_bzero(creds[i]->ticket.data, creds[i]->ticket.length);

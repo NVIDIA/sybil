@@ -22,6 +22,7 @@ const DEFAULT_TKT_MINIMUM_LIFETIME: &str = "5m";
 #[serde(default)]
 pub struct Permissions {
     pub kinit: bool,
+    pub list: bool,
     pub read: bool,
     pub write: bool,
     pub masquerade: bool,
@@ -85,8 +86,9 @@ impl fmt::Display for Permissions {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{}{}{}{}",
+            "{}{}{}{}{}",
             if self.kinit { "k" } else { "-" },
+            if self.list { "l" } else { "-" },
             if self.read { "r" } else { "-" },
             if self.write { "w" } else { "-" },
             if self.masquerade { "m" } else { "-" }

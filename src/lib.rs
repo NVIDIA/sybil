@@ -19,6 +19,7 @@ use crate::conf::config;
 use crate::gss::{CredUsage, SecurityContext, MECH};
 use crate::trace::*;
 
+use auth::Identity;
 use futures::prelude::*;
 use nix::{
     errno::Errno,
@@ -28,6 +29,7 @@ use privsep::PrivSepChild;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 use std::{
+    convert,
     error::Error as StdError,
     ffi::CStr,
     fmt::Display,
@@ -119,6 +121,7 @@ trait Sybil {
     async fn new_creds() -> Result<gss::Token, SybilError>;
     async fn put_creds() -> Result<(), SybilError>;
     async fn get_creds(uid: Option<u32>) -> Result<gss::Token, SybilError>;
+    async fn list_creds(uid: Vec<u32>) -> Result<Vec<krb::CredentialsInfo>, SybilError>;
 }
 
 #[derive(Clone)]
@@ -164,6 +167,26 @@ where
     res
 }
 
+fn privs_from_uid(uid: u32) -> Result<(Uid, Gid), SybilError> {
+    match User::from_uid(uid.into()) {
+        Err(_) | Ok(None) => {
+            tracing::error!(uid, "could not lookup user");
+            Err(SybilError::UserNotFound)
+        }
+        Ok(Some(user)) => Ok((user.uid, user.gid)),
+    }
+}
+
+fn privs_from_identity(id: &Identity) -> Result<(Uid, Gid), SybilError> {
+    match id.user.as_ref() {
+        None => {
+            tracing::error!(principal = %id.principal, "could not find user for principal");
+            Err(SybilError::UserNotFound)
+        }
+        Some(user) => Ok((user.uid, user.gid)),
+    }
+}
+
 impl Sybil for SybilServer {
     async fn gss_init(self, _: Context, token: gss::Token) -> Result<Option<gss::Token>, SybilError> {
         tracing::debug!("performing GSS negotiation step");
@@ -187,7 +210,7 @@ impl Sybil for SybilServer {
         tracing::info!(principal = %id.principal, "new credentials request");
 
         let user = id.username(!config().ticket.fully_qualified_user).ok_or_else(|| {
-            tracing::warn!(principal = %id.principal, "could not find user for principal");
+            tracing::error!(principal = %id.principal, "could not find user for principal");
             SybilError::UserNotFound
         })?;
         let realm = krb::default_realm().map_err(|err| {
@@ -252,10 +275,7 @@ impl Sybil for SybilServer {
 
         tracing::info!(principal = %id.principal, "put credentials request");
 
-        let (uid, gid) = id.user.as_ref().map(|u| (u.uid, u.gid)).ok_or_else(|| {
-            tracing::warn!(principal = %id.principal, "could not find user for principal");
-            SybilError::UserNotFound
-        })?;
+        let (uid, gid) = privs_from_identity(id)?;
 
         tracing::debug!("retrieving delegated credentials");
         let gss = self.gss.lock().await;
@@ -292,22 +312,7 @@ impl Sybil for SybilServer {
 
         tracing::info!(principal = %id.principal, uid = uid.display(), "get credentials request");
 
-        let (uid, gid) = match uid {
-            Some(uid) => match User::from_uid(uid.into()) {
-                Err(_) | Ok(None) => {
-                    tracing::debug!(uid, "could not lookup user");
-                    return Err(SybilError::UserNotFound);
-                }
-                Ok(Some(user)) => (user.uid, user.gid),
-            },
-            None => match &id.user {
-                None => {
-                    tracing::warn!(principal = %id.principal, "could not find user for principal");
-                    return Err(SybilError::UserNotFound);
-                }
-                Some(user) => (user.uid, user.gid),
-            },
-        };
+        let (uid, gid) = uid.map(privs_from_uid).unwrap_or_else(|| privs_from_identity(id))?;
 
         tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "fetching kerberos credentials");
         let creds = with_privileges(uid, gid, || {
@@ -331,13 +336,58 @@ impl Sybil for SybilServer {
             })
             .map(Into::into)
     }
+
+    async fn list_creds(self, _: Context, uids: Vec<u32>) -> Result<Vec<krb::CredentialsInfo>, SybilError> {
+        if uids.iter().any(|u| Uid::from_raw(*u).is_root()) {
+            tracing::warn!("request refused due to masquerading as root");
+            return Err(SybilError::Unauthorized);
+        }
+        let perms = if !uids.is_empty() {
+            auth::Permissions::LIST | auth::Permissions::MASQUERADE
+        } else {
+            auth::Permissions::LIST
+        };
+        let id = &self.authorize(perms).await?;
+
+        tracing::info!(principal = %id.principal, ?uids, "list credentials request");
+
+        let privs = if !uids.is_empty() {
+            uids.into_iter().map(privs_from_uid).collect()
+        } else {
+            privs_from_identity(id).map(|p| vec![p])
+        }?;
+
+        let info = stream::iter(privs)
+            .filter_map(|(uid, gid)| async move {
+                tokio::task::spawn_blocking(move || {
+                    tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "listing kerberos credentials");
+                    with_privileges(uid, gid, || {
+                        krb::Credentials::fetch(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime), false)
+                            .and_then(|creds| creds.info())
+                            .boxed()
+                    })
+                })
+                .await
+                .map_err(Into::into)
+                .and_then(convert::identity)
+                .map_err(|err| {
+                    tracing::warn!(error = err.chain(), "could not list credentials");
+                    SybilError::CredsFetch
+                })
+                .ok()
+            })
+            .collect()
+            .await;
+
+        Ok(info)
+    }
 }
 
 impl SybilServer {
     async fn authorize(&self, perms: auth::Permissions) -> Result<auth::Identity, SybilError> {
         let mut gss = self.gss.lock().await;
         if !gss.is_complete() || !gss.open().unwrap_or(false) {
-            tracing::warn!("request refused due to missing authentication");
+            tracing::error!("request refused due to missing authentication");
             return Err(SybilError::AuthRequired);
         }
         auth::authorize(gss.deref_mut(), &self.peer, perms).ok_or(SybilError::Unauthorized)
@@ -570,7 +620,8 @@ impl Client {
             .deref()
             .try_into()?;
         let lifetime = creds
-            .lifetime()?
+            .info()
+            .map(|i| i.end_time)?
             .duration_since(SystemTime::now())
             .map_err(Into::<krb::Error>::into)?;
 
@@ -609,7 +660,8 @@ impl Client {
             .deref()
             .try_into()?;
         let lifetime = creds
-            .lifetime()?
+            .info()
+            .map(|i| i.end_time)?
             .duration_since(SystemTime::now())
             .map_err(Into::<krb::Error>::into)?;
 
@@ -630,6 +682,15 @@ impl Client {
                 Ok(None)
             }
         }
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn list(&mut self, uids: &[u32]) -> Result<Vec<krb::CredentialsInfo>, Error> {
+        tracing::info!("listing kerberos credentials");
+        self.rpc
+            .list_creds(context::current(), uids.to_vec())
+            .await?
+            .map_err(Into::into)
     }
 }
 

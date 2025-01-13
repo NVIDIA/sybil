@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use nix::unistd::{self, SysconfVar};
+use nix::unistd::{self, SysconfVar, Uid};
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
     cell::Cell,
     error,
     ffi::{CStr, CString, FromBytesUntilNulError, IntoStringError, NulError},
     fmt,
+    mem::MaybeUninit,
     ops::Deref,
     os::raw,
     ptr,
@@ -170,6 +171,15 @@ impl Deref for Credentials {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CredentialsInfo {
+    pub uid: u32,
+    pub principal: String,
+    pub start_time: SystemTime,
+    pub end_time: SystemTime,
+    pub renew_until: SystemTime,
+}
+
 pub fn default_realm() -> Result<String, Error> {
     let ctx = CONTEXT.get();
 
@@ -299,14 +309,45 @@ impl Credentials {
         }
     }
 
-    pub fn lifetime(&self) -> Result<SystemTime, Error> {
-        let mut lifetime: libc::time_t = 0;
+    pub fn info(&self) -> Result<CredentialsInfo, Error> {
+        fn principal_to_string(princ: cffi::krb5_principal) -> Result<String, Error> {
+            let ctx = CONTEXT.get();
+
+            unsafe {
+                let mut ptr = ptr::null_mut::<raw::c_char>();
+                let ret = cffi::krb5_unparse_name(ctx.0, princ, &mut ptr);
+                if ret == 0 {
+                    let name = CStr::from_ptr(ptr).to_str().map(str::to_owned);
+                    cffi::krb5_free_unparsed_name(ctx.0, ptr);
+                    cffi::krb5_free_principal(ctx.0, princ);
+                    Ok(name?)
+                } else {
+                    cffi::krb5_free_principal(ctx.0, princ);
+                    Err(ret.into())
+                }
+            }
+        }
+
+        let mut princ = MaybeUninit::uninit();
+        let mut times = MaybeUninit::uninit();
+
         let ctx = CONTEXT.get();
 
         assert!(!self.0.is_null());
-        let ret = unsafe { cffi::krbutil_lifetime_creds(ctx.0, &mut lifetime, self.0) };
+        let ret = unsafe { cffi::krbutil_info_creds(ctx.0, princ.as_mut_ptr(), times.as_mut_ptr(), self.0) };
         if ret == 0 {
-            Ok(UNIX_EPOCH + Duration::from_secs(lifetime as u64))
+            unsafe {
+                let princ = princ.assume_init();
+                let times = times.assume_init();
+
+                Ok(CredentialsInfo {
+                    uid: Uid::current().into(),
+                    principal: principal_to_string(princ)?,
+                    start_time: UNIX_EPOCH + Duration::from_secs(times.starttime as u64),
+                    end_time: UNIX_EPOCH + Duration::from_secs(times.endtime as u64),
+                    renew_until: UNIX_EPOCH + Duration::from_secs(times.renew_till as u64),
+                })
+            }
         } else {
             Err(ret.into())
         }
@@ -316,6 +357,7 @@ impl Credentials {
     pub fn will_last_for(&self, lifetime: &str) -> Result<bool, Error> {
         let lifetime = CString::new(lifetime)?;
         let mut renewable = false;
+
         let ctx = CONTEXT.get();
 
         assert!(!self.0.is_null());

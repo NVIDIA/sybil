@@ -4,6 +4,7 @@
  */
 
 use argh::FromArgs;
+use chrono::{DateTime, Local};
 use std::env;
 
 #[derive(FromArgs)]
@@ -22,6 +23,7 @@ enum Command {
     Kinit(KinitArguments),
     Store(StoreArguments),
     Fetch(FetchArguments),
+    List(ListArguments),
 }
 
 #[derive(FromArgs)]
@@ -54,6 +56,15 @@ struct FetchArguments {
     /// daemonize the refreshing process
     #[argh(switch, short = 'd')]
     daemonize: bool,
+}
+
+#[derive(FromArgs)]
+#[argh(subcommand, name = "list")]
+/// List credentials present in the remote Sybil server.
+struct ListArguments {
+    /// UID to masquerade as
+    #[argh(option, short = 'u')]
+    uids: Vec<u32>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -100,6 +111,26 @@ async fn main() -> Result<(), sybil::Error> {
                 }
             } else {
                 client.fetch(args.uid).await?;
+            }
+        }
+        Command::List(args) => {
+            let mut client = sybil::new_client(main_args.host, None, sybil::DelegatePolicy::None).await?;
+            client.authenticate().await?;
+            let info = client.list(&args.uids).await?;
+
+            println!(
+                "{:<12}{:<21}{:<21}{:<21}{:<9}",
+                "UID", "START_TIME", "END_TIME", "RENEW_UNTIL", "PRINCIPAL"
+            );
+            for i in info {
+                println!(
+                    "{:<12}{:<21}{:<21}{:<21}{}",
+                    i.uid,
+                    DateTime::<Local>::from(i.start_time).format("%Y-%m-%dT%H:%M:%S"),
+                    DateTime::<Local>::from(i.end_time).format("%Y-%m-%dT%H:%M:%S"),
+                    DateTime::<Local>::from(i.renew_until).format("%Y-%m-%dT%H:%M:%S"),
+                    i.principal,
+                );
             }
         }
     };

@@ -24,6 +24,7 @@ slurm = []
 
 [dependencies]
 argh = "0.1.13"
+chrono = { version = "0.4.39", features = ["clock"], default-features = false }
 bitflags = "2.6.0"
 close_fds = "0.3.2"
 config = { version = "0.15.4", features = ["toml"], default-features = false }
