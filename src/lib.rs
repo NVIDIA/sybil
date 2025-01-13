@@ -230,7 +230,8 @@ impl Sybil for SybilServer {
             }
         }
 
-        let princ = if config().ticket.cross_realm {
+        let clnt_princ = String::from(user);
+        let serv_princ = if config().ticket.cross_realm {
             format!(
                 "{}/{realm}@{}",
                 krb::TGS_NAME,
@@ -243,16 +244,22 @@ impl Sybil for SybilServer {
             format!("{}/{realm}", krb::TGS_NAME)
         };
 
-        tracing::debug!(%user, krbtgt = %princ, "forging kerberos credentials");
-        let creds = krb::Credentials::forge(
-            user,
-            &princ,
-            &config().ticket.cipher,
-            &config().ticket.flags,
-            None,
-            Some(&config().ticket.lifetime),
-            Some(&config().ticket.renewable_lifetime),
-        )
+        tracing::debug!(%user, krbtgt = %serv_princ, "forging kerberos credentials");
+        let creds = tokio::task::spawn_blocking(move || {
+            krb::Credentials::forge(
+                &clnt_princ,
+                &serv_princ,
+                &config().ticket.cipher,
+                &config().ticket.flags,
+                None,
+                Some(&config().ticket.lifetime),
+                Some(&config().ticket.renewable_lifetime),
+            )
+            .boxed()
+        })
+        .await
+        .map_err(Into::into)
+        .and_then(convert::identity)
         .map_err(|err| {
             tracing::error!(error = err.chain(), %user, "could not forge credentials");
             SybilError::CredsGenerate
@@ -278,8 +285,8 @@ impl Sybil for SybilServer {
         let (uid, gid) = privs_from_identity(id)?;
 
         tracing::debug!("retrieving delegated credentials");
-        let gss = self.gss.lock().await;
-        let creds = gss.delegated_cred().ok_or_else(|| {
+        let mut gss = self.gss.lock().await;
+        let creds = gss.take_delegated_cred().ok_or_else(|| {
             tracing::error!("delegated credentials not found in GSS context");
             SybilError::GssDelegate
         })?;
@@ -287,11 +294,16 @@ impl Sybil for SybilServer {
         // XXX: Should we enforce that the delegated credentials matches our principal?
 
         tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "storing delegated credentials");
-        with_privileges(uid, gid, || {
-            creds
-                .store(SYBIL_CREDS_STORE, true, true, CredUsage::Initiate, Some(MECH))
-                .boxed()
+        tokio::task::spawn_blocking(move || {
+            with_privileges(uid, gid, || {
+                creds
+                    .store(SYBIL_CREDS_STORE, true, true, CredUsage::Initiate, Some(MECH))
+                    .boxed()
+            })
         })
+        .await
+        .map_err(Into::into)
+        .and_then(convert::identity)
         .map_err(|err| {
             tracing::error!(error = err.chain(), "could not store credentials");
             SybilError::CredsStore
@@ -315,9 +327,14 @@ impl Sybil for SybilServer {
         let (uid, gid) = uid.map(privs_from_uid).unwrap_or_else(|| privs_from_identity(id))?;
 
         tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "fetching kerberos credentials");
-        let creds = with_privileges(uid, gid, || {
-            krb::Credentials::fetch(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime), true).boxed()
+        let creds = tokio::task::spawn_blocking(move || {
+            with_privileges(uid, gid, || {
+                krb::Credentials::fetch(SYBIL_CREDS_STORE, Some(&config().ticket.minimum_lifetime), true).boxed()
+            })
         })
+        .await
+        .map_err(Into::into)
+        .and_then(convert::identity)
         .map_err(|err| {
             tracing::error!(error = err.chain(), "could not fetch credentials");
             SybilError::CredsFetch
