@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use crate::slurm::*;
 use crate::trace::*;
 
 use std::{cell::Cell, error::Error, result::Result};
@@ -12,7 +13,7 @@ thread_local! {
     static REFRESH_PROCESS: Cell<Option<crate::PrivSepChild>> = const { Cell::new(None) };
 }
 
-pub async fn store_credentials(min_tkt_lifetime: Option<&str>) -> Result<(), Box<dyn Error>> {
+pub fn check_credentials(lifetime: Option<&str>) -> Result<(), Box<dyn Error>> {
     let creds = crate::krb::default_ccache()
         .and_then(|ccache| crate::krb::Credentials::fetch(&ccache, Some("5m"), false))
         .map_err(|err| {
@@ -20,13 +21,13 @@ pub async fn store_credentials(min_tkt_lifetime: Option<&str>) -> Result<(), Box
             "Kerberos credentials not found, make sure that `klist` shows active tickets"
         })?;
 
-    if min_tkt_lifetime.is_some_and(|l| !l.is_empty() && l != "0") {
+    if lifetime.is_some_and(|l| !l.is_empty() && l != "0") {
         creds
-            .will_last_for(min_tkt_lifetime.unwrap())
+            .will_last_for(lifetime.unwrap())
             .unwrap_or_else(|err| {
                 tracing::error!(
                     error = err.chain(),
-                    lifetime = min_tkt_lifetime.display(),
+                    lifetime = lifetime.display(),
                     "could not evaluate minimum ticket lifetime requirement"
                 );
                 false
@@ -38,13 +39,17 @@ pub async fn store_credentials(min_tkt_lifetime: Option<&str>) -> Result<(), Box
             )?;
     }
 
+    Ok(())
+}
+
+pub async fn store_credentials() -> Result<(), crate::Error> {
     let mut client = crate::new_client(None::<String>, None, crate::DelegatePolicy::ForceDelegate).await?;
     client.authenticate().await?;
     client.store().await?;
     Ok(())
 }
 
-pub async fn fetch_credentials(uid: u32) -> Result<(), Box<dyn Error>> {
+pub async fn fetch_credentials(uid: u32) -> Result<(), crate::Error> {
     let mut client = crate::new_client(None::<String>, None, crate::DelegatePolicy::None).await?;
     client.authenticate().await?;
 
@@ -53,14 +58,14 @@ pub async fn fetch_credentials(uid: u32) -> Result<(), Box<dyn Error>> {
         .await?;
 
     if let Some(ref mut proc) = proc {
-        tokio::task::spawn_blocking(proc.copy_output_blocking(crate::slurm::SpankLogger.make_writer()));
+        tokio::task::spawn_blocking(proc.copy_output_blocking(SpankLogger.make_writer()));
     }
 
     REFRESH_PROCESS.set(proc);
     Ok(())
 }
 
-pub async fn terminate() {
+pub async fn cleanup() {
     if let Some(mut proc) = REFRESH_PROCESS.take() {
         proc.kill();
         proc.wait().await;

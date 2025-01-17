@@ -12,13 +12,9 @@ use nix::{
     unistd,
 };
 use std::{
-    ffi::CStr,
     io::Error as IOError,
     ops::Deref,
-    os::{
-        fd::AsRawFd,
-        raw::{c_char, c_void},
-    },
+    os::{fd::AsRawFd, raw::c_void},
     ptr::{self, NonNull},
     slice,
 };
