@@ -226,6 +226,17 @@ pub fn local_user(princ: &str) -> Result<String, Error> {
     }
 }
 
+pub fn destroy_all_ccaches() -> Result<(), Error> {
+    let ctx = CONTEXT.get();
+
+    let ret = unsafe { cffi::krbutil_destroy_all_ccaches(ctx.0) };
+    if ret == 0 {
+        Ok(())
+    } else {
+        Err(ret.into())
+    }
+}
+
 impl Credentials {
     pub fn forge(
         clnt_princ: &str,

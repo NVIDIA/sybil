@@ -548,3 +548,24 @@ out_ccache:
 out_realm:
         return (ret);
 }
+
+krb5_error_code krbutil_destroy_all_ccaches(krb5_context ctx)
+{
+        krb5_error_code ret;
+        krb5_ccache ccache;
+        krb5_cccol_cursor cursor;
+
+        ret = krb5_cccol_cursor_new(ctx, &cursor);
+        goto_out(ret, cursor);
+
+        while ((ret = krb5_cccol_cursor_next(ctx, cursor, &ccache)) == 0 && ccache != NULL) {
+                ret = krb5_cc_destroy(ctx, ccache);
+                krb5_cc_close(ctx, ccache);
+                goto_out(ret, ccache);
+        }
+
+out_ccache:
+        krb5_cccol_cursor_free(ctx, &cursor);
+out_cursor:
+        return (ret);
+}

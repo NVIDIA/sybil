@@ -95,7 +95,7 @@ impl PrivSep for UserProcess {
                         timer.reset_at(halflife(lifetime));
                         ticks = 0
                     }
-                    Err(err) => tracing::error!(error = err.chain(), "could not refresh kerberos credentials"),
+                    Err(err) => tracing::error!(error = err.chain(), "could not refresh credentials"),
                 };
             }
             tracing::error!("maximum retries exhausted, exiting");

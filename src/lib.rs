@@ -167,7 +167,7 @@ where
     res
 }
 
-fn privs_from_uid(uid: u32) -> Result<(Uid, Gid), SybilError> {
+fn privs_from_raw_uid(uid: u32) -> Result<(Uid, Gid), SybilError> {
     match User::from_uid(uid.into()) {
         Err(_) | Ok(None) => {
             tracing::error!(uid, "could not lookup user");
@@ -184,6 +184,15 @@ fn privs_from_identity(id: &Identity) -> Result<(Uid, Gid), SybilError> {
             Err(SybilError::UserNotFound)
         }
         Some(user) => Ok((user.uid, user.gid)),
+    }
+}
+
+pub fn kdestroy(uid: Option<u32>) {
+    tracing::info!(uid = uid.display(), "purging kerberos credentials");
+    if let Ok((uid, gid)) = privs_from_raw_uid(uid.unwrap_or_else(|| Uid::effective().into())) {
+        with_privileges(uid, gid, || krb::destroy_all_ccaches().boxed())
+            .map_err(|err| tracing::error!(error = err.chain(), "could not purge credentials"))
+            .ok();
     }
 }
 
@@ -324,7 +333,7 @@ impl Sybil for SybilServer {
 
         tracing::info!(principal = %id.principal, uid = uid.display(), "get credentials request");
 
-        let (uid, gid) = uid.map(privs_from_uid).unwrap_or_else(|| privs_from_identity(id))?;
+        let (uid, gid) = uid.map(privs_from_raw_uid).unwrap_or_else(|| privs_from_identity(id))?;
 
         tracing::debug!(ccache = %format!("{SYBIL_CREDS_STORE}{uid}"), "fetching kerberos credentials");
         let creds = tokio::task::spawn_blocking(move || {
@@ -369,7 +378,7 @@ impl Sybil for SybilServer {
         tracing::info!(principal = %id.principal, ?uids, "list credentials request");
 
         let privs = if !uids.is_empty() {
-            uids.into_iter().map(privs_from_uid).collect()
+            uids.into_iter().map(privs_from_raw_uid).collect()
         } else {
             privs_from_identity(id).map(|p| vec![p])
         }?;

@@ -65,9 +65,11 @@ pub async fn fetch_credentials(uid: u32) -> Result<(), crate::Error> {
     Ok(())
 }
 
-pub async fn cleanup() {
+pub async fn purge_credentials(uid: u32) {
     if let Some(mut proc) = REFRESH_PROCESS.take() {
         proc.kill();
         proc.wait().await;
     }
+
+    crate::kdestroy(uid.into());
 }

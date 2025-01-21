@@ -342,6 +342,7 @@ pub extern "C" fn slurm_spank_task_init(_ctx: spank::spank_t, _argc: c_int, _arg
 
 #[no_mangle]
 pub extern "C" fn slurm_spank_exit(ctx: spank::spank_t, _argc: c_int, _argv: *mut *mut c_char) -> c_int {
+    let mut job_uid = 0u32;
     let mut step_id = 0u32;
 
     SPANK_ERROR.set(None);
@@ -350,12 +351,15 @@ pub extern "C" fn slurm_spank_exit(ctx: spank::spank_t, _argc: c_int, _argv: *mu
         return spank::SLURM_SUCCESS as _;
     }
 
+    if unsafe { spank::spank_get_item(ctx, spank::spank_item_S_JOB_UID, &mut job_uid) } != spank::ESPANK_SUCCESS {
+        return SpankError::Fatal("failed to get job UID".into()).into();
+    }
     if unsafe { spank::spank_get_item(ctx, spank::spank_item_S_JOB_STEPID, &mut step_id) } != spank::ESPANK_SUCCESS {
         return SpankError::Fatal("failed to get jobstep ID".into()).into();
     }
 
     if step_id == spank::SLURM_EXTERN_CONT {
-        RUNTIME.with_borrow(|rt| rt.block_on(async { ops::cleanup().await }));
+        RUNTIME.with_borrow(|rt| rt.block_on(async { ops::purge_credentials(job_uid).await }));
     }
     spank::SLURM_SUCCESS as _
 }

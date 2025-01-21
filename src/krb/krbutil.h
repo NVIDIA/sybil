@@ -21,3 +21,4 @@ krb5_error_code krbutil_info_creds(krb5_context, krb5_principal *, krb5_ticket_t
 krb5_error_code krbutil_lasting_creds(krb5_context, const char *, bool *, const krb5_data *)  __attribute__((nonnull(2,3,4)));
 krb5_error_code krbutil_store_creds(krb5_context, const krb5_data *) __attribute__((nonnull(2)));
 krb5_error_code krbutil_fetch_creds(krb5_context, krb5_data **, const char *, const char *, bool) __attribute__((nonnull(3)));
+krb5_error_code krbutil_destroy_all_ccaches(krb5_context);
