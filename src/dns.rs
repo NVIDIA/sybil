@@ -7,8 +7,10 @@ use rand::Rng;
 use snafu::prelude::*;
 use std::{
     cmp::Reverse,
+    io,
     net::{IpAddr, SocketAddr, ToSocketAddrs},
 };
+use tokio::net;
 use trust_dns_resolver::{
     error::ResolveError,
     proto::rr::{domain::Name, rdata::srv::SRV},
@@ -18,6 +20,8 @@ use trust_dns_resolver::{
 #[derive(Debug, Snafu)]
 #[snafu(context(suffix(false)))]
 pub enum Error {
+    #[snafu(display("Failed to resolve host `{host}`"))]
+    HostLookup { host: String, source: io::Error },
     #[snafu(display("Failed to resolve address `{addr}`"))]
     ReverseLookup { addr: IpAddr, source: ResolveError },
     #[snafu(display("Failed to find host for address `{addr}`"))]
@@ -26,6 +30,13 @@ pub enum Error {
     ServiceLookup { srv: String, source: ResolveError },
     #[snafu(display("Failed to find addresses for service `{srv}`"))]
     ServiceAddrs { srv: String },
+}
+
+pub async fn lookup_host(host: &str) -> Result<Vec<SocketAddr>, Error> {
+    net::lookup_host(host)
+        .await
+        .context(HostLookup { host: host.to_owned() })
+        .map(Iterator::collect)
 }
 
 pub async fn lookup_address(addr: &IpAddr) -> Result<String, Error> {

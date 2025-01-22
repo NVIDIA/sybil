@@ -509,9 +509,10 @@ pub async fn new_client(
 
     let (host, rpc) = match addrs {
         _ if !config().server_addrs.is_empty() => {
-            let addrs = config().server_addrs.as_slice();
+            let addrs = config().server_addrs.iter().map(|h| dns::lookup_host(h));
+            let addrs = future::try_join_all(addrs).await?.concat();
             tracing::info!(?addrs, "connecting to sybil server");
-            let stream = StubbornTcpStream::connect_with_options(addrs, retries).await?;
+            let stream = StubbornTcpStream::connect_with_options(&*addrs.leak(), retries).await?; // FIXME avoid leak
             let host = dns::lookup_address(&stream.deref().peer_addr()?.ip()).await?;
             let transport = Transport::from((stream, Bincode::default()));
             let rpc = SybilClient::new(Default::default(), transport).spawn();
