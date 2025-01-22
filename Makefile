@@ -17,15 +17,15 @@ ifdef WITH_SLURM
 endif
 
 deb: release
-	cargo deb --target $(TARGET) --no-build --multiarch foreign
+	cargo deb --target $(TARGET) --no-build --multiarch foreign $${TAG:+--deb-revision $$TAG}
 ifdef WITH_SLURM
-	cargo deb --target $(TARGET) --no-build --multiarch foreign --variant spank
+	cargo deb --target $(TARGET) --no-build --multiarch foreign $${TAG:+--deb-revision $$TAG} --variant spank
 endif
 
 rpm: release
-	cargo generate-rpm --target $(TARGET)
+	cargo generate-rpm --target $(TARGET) $${TAG:+-s "release = '$$TAG'"}
 ifdef WITH_SLURM
-	cargo generate-rpm --target $(TARGET) --variant spank
+	cargo generate-rpm --target $(TARGET) $${TAG:+-s "release = '$$TAG'"} --variant spank
 endif
 
 clean:
