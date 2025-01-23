@@ -84,6 +84,7 @@ impl PrivSep for UserProcess {
                 timer.tick().await;
                 ticks += 1;
 
+                tracing::info!("refreshing kerberos credentials");
                 match crate::new_client(env::var(SYBIL_ENV_HOST).ok(), None, crate::DelegatePolicy::None)
                     .and_then(|mut c| async move {
                         c.authenticate().await?;
