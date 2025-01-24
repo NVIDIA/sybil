@@ -35,9 +35,11 @@ hosts = []
 [acl.permissions]
 # Permission to kinit
 kinit = false
-# Permission to fetch and list
+# Permission to list
+list = false
+# Permission to fetch
 read = false
-# Permission to store and delete
+# Permission to store
 write = false
 # Permission to masquerade as any user
 masquerade = false
