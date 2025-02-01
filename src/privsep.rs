@@ -123,7 +123,7 @@ pub fn spawn_user_process_from_uid(uid: Uid, daemonize: bool) -> Result<(PrivSep
 pub fn spawn_user_process(user: &User, daemonize: bool) -> Result<(PrivSepClient, PrivSepChild), Error> {
     let ppid = Pid::this();
     let env: Vec<(String, String)> = env::vars()
-        .filter(|(v, _)| v.starts_with("RUST_LOG") || v.starts_with("KRB5") || v.starts_with("SYBIL_"))
+        .filter(|(v, _)| v.starts_with("KRB5") || v.starts_with("SYBIL_"))
         .collect();
 
     tracing::debug!(user = %user.name, "spawning user process");

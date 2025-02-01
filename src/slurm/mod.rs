@@ -46,10 +46,10 @@ pub static plugin_type: [u8; 6] = *b"spank\0";
 pub static plugin_name: [u8; 6] = *b"sybil\0";
 #[no_mangle]
 #[used]
-pub static mut plugin_version: c_uint = spank::SLURM_VERSION_NUMBER;
+pub static plugin_version: c_uint = spank::SLURM_VERSION_NUMBER;
 #[no_mangle]
 #[used]
-pub static mut spank_plugin_version: c_uint = utils::cargo_package_version();
+pub static spank_plugin_version: c_uint = utils::cargo_package_version();
 
 thread_local! {
     static RUNTIME: RefCell<Runtime> = panic!("uninitialized runtime");
