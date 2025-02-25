@@ -17,8 +17,8 @@ bitflags! {
     pub struct Permissions : u32 {
         const KINIT      = 1;
         const LIST       = 1 << 1;
-        const READ       = 1 << 2;
-        const WRITE      = 1 << 3;
+        const FETCH      = 1 << 2;
+        const STORE      = 1 << 3;
         const MASQUERADE = 1 << 4;
     }
 }
@@ -34,8 +34,8 @@ impl From<&conf::Permissions> for Permissions {
         Self::default()
             | perms.kinit.then_some(Self::KINIT).unwrap_or_default()
             | perms.list.then_some(Self::LIST).unwrap_or_default()
-            | perms.read.then_some(Self::READ).unwrap_or_default()
-            | perms.write.then_some(Self::WRITE).unwrap_or_default()
+            | perms.fetch.then_some(Self::FETCH).unwrap_or_default()
+            | perms.store.then_some(Self::STORE).unwrap_or_default()
             | perms.masquerade.then_some(Self::MASQUERADE).unwrap_or_default()
     }
 }

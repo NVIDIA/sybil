@@ -287,7 +287,7 @@ impl Sybil for SybilServer {
     }
 
     async fn put_creds(self, _: Context) -> Result<(), SybilError> {
-        let id = &self.authorize(auth::Permissions::WRITE).await?;
+        let id = &self.authorize(auth::Permissions::STORE).await?;
 
         tracing::info!(principal = %id.principal, "put credentials request");
 
@@ -325,9 +325,9 @@ impl Sybil for SybilServer {
             return Err(SybilError::Unauthorized);
         }
         let perms = if uid.is_some() {
-            auth::Permissions::READ | auth::Permissions::MASQUERADE
+            auth::Permissions::FETCH | auth::Permissions::MASQUERADE
         } else {
-            auth::Permissions::READ
+            auth::Permissions::FETCH
         };
         let id = &self.authorize(perms).await?;
 

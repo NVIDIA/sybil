@@ -23,8 +23,8 @@ const DEFAULT_TKT_MINIMUM_LIFETIME: &str = "5m";
 pub struct Permissions {
     pub kinit: bool,
     pub list: bool,
-    pub read: bool,
-    pub write: bool,
+    pub fetch: bool,
+    pub store: bool,
     pub masquerade: bool,
 }
 
@@ -89,8 +89,8 @@ impl fmt::Display for Permissions {
             "{}{}{}{}{}",
             if self.kinit { "k" } else { "-" },
             if self.list { "l" } else { "-" },
-            if self.read { "r" } else { "-" },
-            if self.write { "w" } else { "-" },
+            if self.fetch { "f" } else { "-" },
+            if self.store { "s" } else { "-" },
             if self.masquerade { "m" } else { "-" }
         )
     }

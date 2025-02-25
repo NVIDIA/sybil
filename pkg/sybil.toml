@@ -38,8 +38,8 @@ kinit = false
 # Permission to list
 list = false
 # Permission to fetch
-read = false
+fetch = false
 # Permission to store
-write = false
+store = false
 # Permission to masquerade as any user
 masquerade = false
