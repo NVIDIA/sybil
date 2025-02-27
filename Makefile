@@ -2,7 +2,7 @@ export SLURM_VERSION ?= 24.11
 export TARGET ?= $(shell rustc -vV | awk '/host/{print $$2}')
 
 check:
-	cargo clippy --all-features
+	cargo clippy --all-features --target $(TARGET)
 
 debug:
 	cargo build --target $(TARGET)
