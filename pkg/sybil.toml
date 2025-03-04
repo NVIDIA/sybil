@@ -25,11 +25,11 @@ cross_realm = false
 
 [[acl]]
 # Allow requests based on specific principal name regexp
-principal = ""
+principal = ''
 # Allow requests based on specific user name regexp
-user = ""
+user = ''
 # Allow requests based on specific group membership regexp
-group = ""
+group = ''
 # Allow requests based on specific host network cidr
 hosts = []
 [acl.permissions]
