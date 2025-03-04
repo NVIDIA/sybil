@@ -15,7 +15,7 @@ thread_local! {
 
 pub fn check_credentials(lifetime: Option<&str>) -> Result<(), Box<dyn Error>> {
     let creds = crate::krb::default_ccache()
-        .and_then(|ccache| crate::krb::Credentials::fetch(&ccache, Some("5m"), false))
+        .and_then(|ccache| crate::krb::Credentials::fetch(&ccache, None, false))
         .map_err(|err| {
             tracing::error!(error = err.chain(), "could not find active credentials");
             "Kerberos credentials not found, make sure that `klist` shows active tickets"
