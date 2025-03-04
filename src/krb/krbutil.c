@@ -560,7 +560,6 @@ krb5_error_code krbutil_destroy_all_ccaches(krb5_context ctx)
 
         while ((ret = krb5_cccol_cursor_next(ctx, cursor, &ccache)) == 0 && ccache != NULL) {
                 ret = krb5_cc_destroy(ctx, ccache);
-                krb5_cc_close(ctx, ccache);
                 goto_out(ret, ccache);
         }
 
