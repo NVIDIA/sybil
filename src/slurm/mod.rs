@@ -38,16 +38,16 @@ const ENV_FORWARD_CREDS: &str = "SYBIL_SPANK_KERBEROS";
 const ENV_REQUIRE_CREDS: &CStr = c"SYBIL_SPANK_KERBEROS_ENABLED";
 const OPT_MIN_TKT_LIFETIME: &str = "min_tkt_lifetime";
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[used]
 pub static plugin_type: [u8; 6] = *b"spank\0";
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[used]
 pub static plugin_name: [u8; 6] = *b"sybil\0";
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[used]
 pub static plugin_version: c_uint = spank::SLURM_VERSION_NUMBER;
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[used]
 pub static spank_plugin_version: c_uint = utils::cargo_package_version();
 
@@ -81,9 +81,11 @@ impl ForwardCredsOpt {
     }
 
     extern "C" fn callback(_val: c_int, opt: *const c_char, _remote: c_int) -> c_int {
-        match unsafe { CStr::from_ptr(opt).to_string_lossy().as_ref() } {
-            "yes" | "no" | "auto" | "force" => spank::SLURM_SUCCESS as _,
-            _ => spank::SLURM_ERROR as _,
+        unsafe {
+            match CStr::from_ptr(opt).to_string_lossy().as_ref() {
+                "yes" | "no" | "auto" | "force" => spank::SLURM_SUCCESS as _,
+                _ => spank::SLURM_ERROR as _,
+            }
         }
     }
 
@@ -164,8 +166,8 @@ impl SpankError {
 
     fn log(&self) {
         let err = match self {
-            Self::Fatal(ref err) => err.into(),
-            Self::Defer(ref shmem) => String::from_utf8_lossy(shmem),
+            Self::Fatal(err) => err.into(),
+            Self::Defer(shmem) => String::from_utf8_lossy(shmem),
         };
         let msg = CString::new(format!("{ERROR_PREFIX}: {}", err)).unwrap();
         unsafe { spank::slurm_error(c"%s".as_ptr(), msg.as_ptr()) };
@@ -216,7 +218,7 @@ impl SpankArgs<'_> {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn slurm_spank_init(ctx: spank::spank_t, _argc: c_int, _argv: *mut *mut c_char) -> c_int {
     let mut job_id = 0u32;
     let mut job_uid = 0u32;
@@ -263,7 +265,7 @@ pub extern "C" fn slurm_spank_init(ctx: spank::spank_t, _argc: c_int, _argv: *mu
     })
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn slurm_spank_init_post_opt(_ctx: spank::spank_t, argc: c_int, argv: *mut *mut c_char) -> c_int {
     match unsafe { spank::spank_context() } {
         spank::spank_context_S_CTX_LOCAL | spank::spank_context_S_CTX_ALLOCATOR => (),
@@ -281,24 +283,24 @@ pub extern "C" fn slurm_spank_init_post_opt(_ctx: spank::spank_t, argc: c_int, a
 
     match forward {
         ForwardCredsOpt::Yes => {
-            env::set_var(require_creds, "1");
+            unsafe { env::set_var(require_creds, "1") };
             if let Err(err) = ops::check_credentials(lifetime) {
                 return err.fatal().into();
             }
         }
         ForwardCredsOpt::No => {
-            env::set_var(require_creds, "0");
+            unsafe { env::set_var(require_creds, "0") };
             return spank::SLURM_SUCCESS as _;
         }
         ForwardCredsOpt::Auto => {
             if ops::check_credentials(lifetime).is_ok() {
-                env::set_var(require_creds, "1");
+                unsafe { env::set_var(require_creds, "1") };
             } else {
-                env::set_var(require_creds, "0");
+                unsafe { env::set_var(require_creds, "0") };
                 return spank::SLURM_SUCCESS as _;
             }
         }
-        ForwardCredsOpt::Force => env::set_var(require_creds, "1"),
+        ForwardCredsOpt::Force => unsafe { env::set_var(require_creds, "1") },
     };
 
     RUNTIME.with_borrow(|rt| {
@@ -310,7 +312,7 @@ pub extern "C" fn slurm_spank_init_post_opt(_ctx: spank::spank_t, argc: c_int, a
     })
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn slurm_spank_user_init(ctx: spank::spank_t, _argc: c_int, _argv: *mut *mut c_char) -> c_int {
     let mut require_creds = [0u8; 2];
 
@@ -332,7 +334,7 @@ pub extern "C" fn slurm_spank_user_init(ctx: spank::spank_t, _argc: c_int, _argv
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn slurm_spank_task_init(_ctx: spank::spank_t, _argc: c_int, _argv: *mut *mut c_char) -> c_int {
     match SPANK_ERROR.take() {
         Some(_) => spank::SLURM_ERROR as _,
@@ -340,7 +342,7 @@ pub extern "C" fn slurm_spank_task_init(_ctx: spank::spank_t, _argc: c_int, _arg
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn slurm_spank_exit(ctx: spank::spank_t, _argc: c_int, _argv: *mut *mut c_char) -> c_int {
     let mut job_uid = 0u32;
     let mut step_id = 0u32;

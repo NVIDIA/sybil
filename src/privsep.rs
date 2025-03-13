@@ -207,7 +207,7 @@ impl PrivSepChild {
             .ok();
     }
 
-    pub fn copy_output(&mut self, mut output: impl AsyncWrite + Unpin) -> impl Future<Output = ()> {
+    pub fn copy_output<T: AsyncWrite + Unpin>(&mut self, mut output: T) -> impl Future<Output = ()> + use<T> {
         let stdout = self.0.stdout.take();
 
         async move {
@@ -217,7 +217,7 @@ impl PrivSepChild {
         }
     }
 
-    pub fn copy_output_blocking(&mut self, mut output: impl Write) -> impl FnOnce() {
+    pub fn copy_output_blocking<T: Write>(&mut self, mut output: T) -> impl FnOnce() + use<T> {
         let stdout = self
             .0
             .stdout

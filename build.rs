@@ -55,6 +55,7 @@ fn generate_spank_bindings(out_dir: &Path) {
         .generate_comments(false)
         .layout_tests(false)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .wrap_unsafe_ops(true)
         .generate()
         .expect("failed to generate spank bindings");
 

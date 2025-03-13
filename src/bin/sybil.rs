@@ -78,7 +78,7 @@ async fn main() -> Result<(), sybil::Error> {
 
     let main_args: Arguments = argh::from_env();
     if let Some(host) = &main_args.host {
-        env::set_var(sybil::SYBIL_ENV_HOST, host);
+        unsafe { env::set_var(sybil::SYBIL_ENV_HOST, host) };
     }
 
     match main_args.command {
