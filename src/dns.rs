@@ -66,7 +66,7 @@ pub async fn lookup_service(srv: &str) -> Result<Vec<SocketAddr>, Error> {
         .collect::<Vec<SRV>>();
 
     records.sort_by_key(|r| {
-        let rng = rand::thread_rng().gen::<u16>() as u32;
+        let rng = rand::rng().random::<u16>() as u32;
         (r.priority(), Reverse(r.weight() as u32 * rng))
     });
 

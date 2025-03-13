@@ -118,13 +118,13 @@ pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Perm
             }
         }
         if let Some(regex) = &rule.user {
-            if regex.as_str().trim().is_empty() || username.map_or(true, |u| !regex.is_match(u)) {
+            if regex.as_str().trim().is_empty() || username.is_none_or(|u| !regex.is_match(u)) {
                 tracing::debug!(rule = r, user = username.display(), "acl rule skipped due to user policy");
                 continue;
             }
         }
         if let Some(regex) = &rule.group {
-            if regex.as_str().trim().is_empty() || id.groups.as_ref().map_or(true, |g| !g.iter().any(|n| regex.is_match(n))) {
+            if regex.as_str().trim().is_empty() || id.groups.as_ref().is_none_or(|g| !g.iter().any(|n| regex.is_match(n))) {
                 tracing::debug!(rule = r, groups = id.groups.debug(), "acl rule skipped due to group policy");
                 continue;
             }

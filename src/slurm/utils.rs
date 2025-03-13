@@ -25,7 +25,7 @@ pub const fn cargo_package_version() -> u32 {
         u32::from_str_radix(env!("CARGO_PKG_VERSION_MINOR"), 10),
         u32::from_str_radix(env!("CARGO_PKG_VERSION_PATCH"), 10),
     ) {
-        (Ok(maj), Ok(min), Ok(patch)) => maj << 16 | min << 8 | patch,
+        (Ok(maj), Ok(min), Ok(patch)) => (maj << 16) | (min << 8) | patch,
         _ => panic!("invalid package version"),
     }
 }

@@ -24,24 +24,24 @@ slurm = []
 
 [dependencies]
 argh = "0.1.13"
-chrono = { version = "0.4.39", features = ["clock"], default-features = false }
-bitflags = "2.8.0"
+chrono = { version = "0.4.40", features = ["clock"], default-features = false }
+bitflags = "2.9.0"
 close_fds = "0.3.2"
-config = { version = "0.15.6", features = ["toml"], default-features = false }
+config = { version = "0.15.11", features = ["toml"], default-features = false }
 futures = "0.3.31"
-libc = "0.2.169"
+libc = "0.2.171"
 libgssapi = { version = "0.8.2", features = ["s4u"] }
 netaddr2 = { version = "0.10.0", features = ["serde"] }
 nix = { version = "0.29.0", features = ["user", "fs", "process", "signal", "mman"] }
-rand = "0.8.5"
+rand = "0.9.0"
 regex-lite = "0.1.6"
-serde = { version = "1.0.217", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
 serde_with = "3.12.0"
 snafu = "0.8.5"
 stubborn-io = { version = "0.3.5", features = ["log"] }
 syslog-tracing = "0.3.1"
 tarpc = { version = "0.35.0", features = ["serde-transport", "serde-transport-bincode", "tcp"] }
-tokio = { version = "1.43.0", features = ["sync", "net", "rt-multi-thread", "process", "macros", "signal", "io-std"] }
+tokio = { version = "1.44.0", features = ["sync", "net", "rt-multi-thread", "process", "macros", "signal", "io-std"] }
 tokio-util = { version = "0.7.13", features = ["rt"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
@@ -49,8 +49,8 @@ trust-dns-resolver = "0.23.2"
 
 [build-dependencies]
 bindgen = "0.71.1"
-cc = "1.2.10"
-reqwest = { version = "0.12.12", features = ["rustls-tls", "blocking"], default-features = false}
+cc = "1.2.16"
+reqwest = { version = "0.12.14", features = ["rustls-tls", "blocking"], default-features = false}
 
 [package.metadata.deb]
 revision = "1"
