@@ -44,7 +44,7 @@ tarpc = { version = "0.35.0", features = ["serde-transport", "serde-transport-bi
 tokio = { version = "1.44.0", features = ["sync", "net", "rt-multi-thread", "process", "macros", "signal", "io-std"] }
 tokio-util = { version = "0.7.13", features = ["rt"] }
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 trust-dns-resolver = "0.23.2"
 
 [build-dependencies]
