@@ -6,7 +6,7 @@
 use argh::FromArgs;
 use tokio::runtime;
 
-const MAX_CONN: usize = 254;
+const MAX_CONN: usize = 1024;
 const NUM_WORKERS: usize = 8;
 
 #[derive(FromArgs)]
@@ -15,13 +15,16 @@ struct Arguments {
     /// number of worker threads
     #[argh(option, short = 'w', default = "NUM_WORKERS")]
     workers: usize,
+    /// maximum number of client connections
+    #[argh(option, short = 'c', default = "MAX_CONN")]
+    maxconn: usize,
     /// address to listen on
     #[argh(option, short = 'l')]
     listen: Option<String>,
 }
 
 async fn run(args: Arguments) -> Result<(), sybil::Error> {
-    let server = sybil::new_server(args.listen, MAX_CONN).await?;
+    let server = sybil::new_server(args.listen, args.maxconn).await?;
     server.run().await;
     Ok(())
 }
