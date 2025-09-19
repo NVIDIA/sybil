@@ -30,7 +30,6 @@ make release WITH_SLURM=1 SLURM_VERSION=24.11
 ```sh
 # Prerequisites
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-cargo install cargo-generate-rpm cargo-deb
 apt install clang libkrb5-dev
 
 make deb rpm
