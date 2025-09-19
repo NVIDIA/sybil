@@ -29,6 +29,7 @@ impl fmt::Display for Permissions {
     }
 }
 
+#[allow(clippy::obfuscated_if_else)]
 impl From<&conf::Permissions> for Permissions {
     fn from(perms: &conf::Permissions) -> Self {
         Self::default()
@@ -65,6 +66,7 @@ impl Identity {
 }
 
 #[rustfmt::skip]
+#[allow(clippy::collapsible_if)]
 pub fn authorize(gss: &mut impl gss::SecurityContext, peer: &IpAddr, perms: Permissions) -> Option<Identity> {
     let principal = gss.source_principal().map_or_else(
         |err| { tracing::error!(error = err.chain(), "could not retrieve source principal"); None },

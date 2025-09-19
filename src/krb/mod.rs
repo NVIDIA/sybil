@@ -21,10 +21,7 @@ use std::{
 };
 
 mod cffi {
-    #![allow(non_upper_case_globals)]
-    #![allow(non_camel_case_types)]
-    #![allow(non_snake_case)]
-    #![allow(dead_code)]
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/krbutil.rs"));
 }
 
@@ -230,11 +227,7 @@ pub fn destroy_all_ccaches() -> Result<(), Error> {
     let ctx = CONTEXT.get();
 
     let ret = unsafe { cffi::krbutil_destroy_all_ccaches(ctx.0) };
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(ret.into())
-    }
+    if ret == 0 { Ok(()) } else { Err(ret.into()) }
 }
 
 impl Credentials {
@@ -271,11 +264,7 @@ impl Credentials {
                 renew_till.as_deref().map_or(ptr::null(), CStr::as_ptr),
             )
         };
-        if ret == 0 {
-            Ok(creds)
-        } else {
-            Err(ret.into())
-        }
+        if ret == 0 { Ok(creds) } else { Err(ret.into()) }
     }
 
     pub fn fetch(ccache: &str, min_life: Option<&str>, with_crealm: bool) -> Result<Credentials, Error> {
@@ -294,11 +283,7 @@ impl Credentials {
                 with_crealm,
             )
         };
-        if ret == 0 {
-            Ok(creds)
-        } else {
-            Err(ret.into())
-        }
+        if ret == 0 { Ok(creds) } else { Err(ret.into()) }
     }
 
     pub fn local_user(&self) -> Result<String, Error> {
@@ -373,11 +358,7 @@ impl Credentials {
 
         assert!(!self.0.is_null());
         let ret = unsafe { cffi::krbutil_lasting_creds(ctx.0, lifetime.as_ptr(), &mut renewable, self.0) };
-        if ret == 0 {
-            Ok(renewable)
-        } else {
-            Err(ret.into())
-        }
+        if ret == 0 { Ok(renewable) } else { Err(ret.into()) }
     }
 
     pub fn store(&self) -> Result<(), Error> {
@@ -385,10 +366,6 @@ impl Credentials {
 
         assert!(!self.0.is_null());
         let ret = unsafe { cffi::krbutil_store_creds(ctx.0, self.0) };
-        if ret == 0 {
-            Ok(())
-        } else {
-            Err(ret.into())
-        }
+        if ret == 0 { Ok(()) } else { Err(ret.into()) }
     }
 }

@@ -14,7 +14,7 @@ use nix::{
 use std::{
     io::Error as IOError,
     ops::Deref,
-    os::{fd::AsRawFd, raw::c_void},
+    os::raw::c_void,
     ptr::{self, NonNull},
     slice,
 };
@@ -54,7 +54,7 @@ impl SharedMemory {
                 unistd::ftruncate(&fd, data.len().try_into().unwrap())?;
                 data.len()
             }
-            None => stat::fstat(fd.as_raw_fd())?.st_size as _,
+            None => stat::fstat(&fd)?.st_size as _,
         };
 
         let flags = if data.is_some() {

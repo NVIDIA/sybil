@@ -16,7 +16,7 @@ mod trace;
 pub use crate::gss::{DelegatePolicy, Principal};
 
 use crate::conf::config;
-use crate::gss::{CredUsage, SecurityContext, MECH};
+use crate::gss::{CredUsage, MECH, SecurityContext};
 use crate::trace::*;
 
 use auth::Identity;
@@ -45,18 +45,18 @@ use syslog_tracing::Syslog;
 use tarpc::{
     client::RpcError,
     context::{self, Context},
-    serde_transport::{tcp, Transport},
+    serde_transport::{Transport, tcp},
     server::{BaseChannel, Channel},
     tokio_serde::formats::Bincode,
 };
 use tokio::{
     net::ToSocketAddrs,
-    signal::unix::{signal, SignalKind},
+    signal::unix::{SignalKind, signal},
     sync::Mutex,
 };
 use tokio_util::task::TaskTracker;
 use tracing::Instrument;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 const SYBIL_PORT: u16 = 57811;
 const SYBIL_SERVICE: &str = "sybil";
@@ -306,7 +306,7 @@ impl Sybil for SybilServer {
         tokio::task::spawn_blocking(move || {
             with_privileges(uid, gid, || {
                 creds
-                    .store(SYBIL_CREDS_STORE, true, true, CredUsage::Initiate, Some(MECH))
+                    .store_into(SYBIL_CREDS_STORE, true, true, CredUsage::Initiate, Some(MECH))
                     .boxed()
             })
         })
