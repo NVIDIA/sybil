@@ -28,6 +28,7 @@ use nix::{
 use privsep::PrivSepChild;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
+use socket2::{SockRef, TcpKeepalive};
 use std::{
     convert,
     error::Error as StdError,
@@ -442,6 +443,11 @@ pub async fn new_server(
 ) -> Result<Server<impl Future>, Error> {
     conf::load_server_config();
 
+    let keepalive = TcpKeepalive::new()
+        .with_time(Duration::from_secs(120))
+        .with_interval(Duration::from_secs(10))
+        .with_retries(3);
+
     let transport = match addrs {
         Some(addrs) => {
             tracing::info!(%addrs, "starting sybil server");
@@ -470,6 +476,7 @@ pub async fn new_server(
         .map(BaseChannel::with_defaults)
         .map(move |c| {
             let rt = rt.clone();
+            let keepalive = keepalive.clone();
 
             async move {
                 let peer = match c.transport().peer_addr() {
@@ -479,6 +486,12 @@ pub async fn new_server(
                         return;
                     }
                 };
+                let sock = SockRef::from(c.transport().get_ref());
+                if let Err(err) = sock.set_tcp_keepalive(&keepalive) {
+                    tracing::error!(error = err.chain(), "could not set TCP keepalive");
+                    return;
+                }
+
                 let Some((srv, span)) = new_service(peer) else {
                     return;
                 };
