@@ -222,7 +222,7 @@ UID         START_TIME           END_TIME             RENEW_UNTIL          PRINC
 1000        2025-03-12T15:04:27  2025-03-13T01:04:27  2025-03-17T12:18:00  user@DOMAIN.LAN
 
 # Submit a Slurm job, forwarding credentials to the allocated nodes
-srun --kerberos=true klist
+srun --kerberos=yes klist
 
 Default principal: user@DOMAIN.LAN
 
