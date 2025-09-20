@@ -85,6 +85,8 @@ assets = [
   ["pkg/slurmd.conf", "usr/share/sybil/slurm/slurmd.conf", "644"],
   ["pkg/plugstack.conf", "usr/share/sybil/slurm/plugstack.conf", "644"],
 ]
+maintainer-scripts = ""
+systemd-units = {}
 
 [package.metadata.generate-rpm]
 release = "1"
