@@ -91,11 +91,13 @@ async fn main() -> Result<(), sybil::Error> {
             let mut client = sybil::new_client(main_args.host, princ, sybil::DelegatePolicy::None).await?;
             client.authenticate().await?;
             client.kinit().await?;
+            client.shutdown().await?;
         }
         Command::Store(_) => {
             let mut client = sybil::new_client(main_args.host, None, sybil::DelegatePolicy::ForceDelegate).await?;
             client.authenticate().await?;
             client.store().await?;
+            client.shutdown().await?;
         }
         Command::Fetch(args) => {
             let mut client = sybil::new_client(main_args.host, None, sybil::DelegatePolicy::None).await?;
@@ -112,6 +114,7 @@ async fn main() -> Result<(), sybil::Error> {
             } else {
                 client.fetch(args.uid).await?;
             }
+            client.shutdown().await?;
         }
         Command::List(args) => {
             let mut client = sybil::new_client(main_args.host, None, sybil::DelegatePolicy::None).await?;
@@ -132,6 +135,7 @@ async fn main() -> Result<(), sybil::Error> {
                     i.principal,
                 );
             }
+            client.shutdown().await?;
         }
     };
     Ok(())

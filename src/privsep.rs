@@ -88,7 +88,9 @@ impl PrivSep for UserProcess {
                 match crate::new_client(env::var(SYBIL_ENV_HOST).ok(), None, crate::DelegatePolicy::None)
                     .and_then(|mut c| async move {
                         c.authenticate().await?;
-                        c.fetch(None).await
+                        let res = c.fetch(None).await;
+                        c.shutdown().await.ok();
+                        res
                     })
                     .await
                 {

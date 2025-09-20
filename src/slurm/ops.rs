@@ -46,6 +46,7 @@ pub async fn store_credentials() -> Result<(), crate::Error> {
     let mut client = crate::new_client(None::<String>, None, crate::DelegatePolicy::ForceDelegate).await?;
     client.authenticate().await?;
     client.store().await?;
+    client.shutdown().await?;
     Ok(())
 }
 
@@ -56,6 +57,7 @@ pub async fn fetch_credentials(uid: u32) -> Result<(), crate::Error> {
     let mut proc = client
         .fetch_and_refresh(uid.into(), crate::RefreshStrategy::Detach)
         .await?;
+    client.shutdown().await?;
 
     if let Some(ref mut proc) = proc {
         tokio::task::spawn_blocking(proc.copy_output_blocking(SpankLogger.make_writer()));

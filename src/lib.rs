@@ -139,6 +139,7 @@ pub struct Server<S: Future> {
 pub struct Client {
     rpc: SybilClient,
     gss: gss::ClientCtx,
+    task: tokio::task::JoinHandle<()>,
 }
 
 #[derive(PartialEq)]
@@ -520,7 +521,9 @@ pub async fn new_client(
         .with_exit_if_first_connect_fails(false)
         .with_retries_generator(|| vec![Duration::from_secs(1), Duration::from_secs(5), Duration::from_secs(10)]);
 
-    let (host, rpc) = match addrs {
+    let conn_lost = move |err| tracing::warn!("connection lost: {err}");
+
+    let (host, rpc, task) = match addrs {
         _ if !config().server_addrs.is_empty() => {
             let addrs = config().server_addrs.iter().map(|h| dns::lookup_host(h));
             let addrs = future::try_join_all(addrs).await?.concat();
@@ -528,16 +531,16 @@ pub async fn new_client(
             let stream = StubbornTcpStream::connect_with_options(&*addrs.leak(), retries).await?; // FIXME avoid leak
             let host = dns::lookup_address(&stream.deref().peer_addr()?.ip()).await?;
             let transport = Transport::from((stream, Bincode::default()));
-            let rpc = SybilClient::new(Default::default(), transport).spawn();
-            (host, rpc)
+            let client = SybilClient::new(Default::default(), transport);
+            (host, client.client, tokio::spawn(client.dispatch.unwrap_or_else(conn_lost)))
         }
         Some(addrs) => {
             tracing::info!(%addrs, "connecting to sybil server");
             let stream = StubbornTcpStream::connect_with_options(addrs, retries).await?;
             let host = dns::lookup_address(&stream.deref().peer_addr()?.ip()).await?;
             let transport = Transport::from((stream, Bincode::default()));
-            let rpc = SybilClient::new(Default::default(), transport).spawn();
-            (host, rpc)
+            let client = SybilClient::new(Default::default(), transport);
+            (host, client.client, tokio::spawn(client.dispatch.unwrap_or_else(conn_lost)))
         }
         None => {
             let addrs = dns::lookup_service(SYBIL_SRV_RECORD).await?;
@@ -545,13 +548,13 @@ pub async fn new_client(
             let stream = StubbornTcpStream::connect_with_options(&*addrs.leak(), retries).await?; // FIXME avoid leak
             let host = dns::lookup_address(&stream.deref().peer_addr()?.ip()).await?;
             let transport = Transport::from((stream, Bincode::default()));
-            let rpc = SybilClient::new(Default::default(), transport).spawn();
-            (host, rpc)
+            let client = SybilClient::new(Default::default(), transport);
+            (host, client.client, tokio::spawn(client.dispatch.unwrap_or_else(conn_lost)))
         }
     };
     let gss = gss::new_client_ctx(princ, Principal::Common(&format!("{SYBIL_SERVICE}@{host}")), delegate)?;
 
-    Ok(Client { rpc, gss })
+    Ok(Client { rpc, gss, task })
 }
 
 impl<S: Future> Server<S> {
@@ -582,6 +585,14 @@ impl<S: Future> Server<S> {
 }
 
 impl Client {
+    #[tracing::instrument(skip_all)]
+    pub async fn shutdown(self) -> Result<(), Error> {
+        tracing::info!("shutting down client");
+        drop(self.rpc);
+
+        Ok(self.task.await.map_err(Into::<io::Error>::into)?)
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn authenticate(&mut self) -> Result<(), Error> {
         let mut token: Option<gss::Token> = None;
