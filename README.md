@@ -181,7 +181,7 @@ apt install ./sybil-spank*.deb
 install -D -m 644 /usr/share/sybil/slurm/plugstack.conf /etc/slurm/plugstack.conf.d/sybil.conf
 
 # On the compute nodes only, configure the slurmd systemd override
-install -D -m 644 /usr/share/sybil/slurm/slurm.conf /etc/systemd/system/slurmd.service.d/sybil.conf
+install -D -m 644 /usr/share/sybil/slurm/slurmd.conf /etc/systemd/system/slurmd.service.d/sybil.conf
 ```
 
 The folowing options can be adjusted in the plugstack configuration:  
