@@ -73,5 +73,7 @@ pub async fn purge_credentials(uid: u32) {
         proc.wait().await;
     }
 
-    crate::kdestroy(uid.into());
+    if let Err(err) = crate::kdestroy(uid.into()).await {
+        tracing::error!(error = err.chain(), "could not purge credentials");
+    }
 }

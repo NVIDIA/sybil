@@ -62,6 +62,7 @@ pub enum Error {
 pub trait PrivSep {
     async fn store_creds(creds: krb::Credentials) -> Result<(), krb::Error>;
     async fn refresh_creds(lifetime: Duration);
+    async fn destroy_creds() -> Result<(), krb::Error>;
 }
 
 #[derive(Clone)]
@@ -72,6 +73,10 @@ struct UserProcess {
 impl PrivSep for UserProcess {
     async fn store_creds(self, _: context::Context, creds: krb::Credentials) -> Result<(), krb::Error> {
         creds.store()
+    }
+
+    async fn destroy_creds(self, _: context::Context) -> Result<(), krb::Error> {
+        krb::destroy_all_ccaches()
     }
 
     async fn refresh_creds(self, _: context::Context, lifetime: Duration) {

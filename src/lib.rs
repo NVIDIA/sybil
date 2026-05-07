@@ -189,13 +189,19 @@ fn privs_from_identity(id: &Identity) -> Result<(Uid, Gid), SybilError> {
     }
 }
 
-pub fn kdestroy(uid: Option<u32>) {
+pub async fn kdestroy(uid: Option<u32>) -> Result<(), Error> {
     tracing::info!(uid = uid.display(), "purging kerberos credentials");
-    if let Ok((uid, gid)) = privs_from_raw_uid(uid.unwrap_or_else(|| Uid::effective().into())) {
-        with_privileges(uid, gid, || krb::destroy_all_ccaches().boxed())
-            .map_err(|err| tracing::error!(error = err.chain(), "could not purge credentials"))
-            .ok();
-    }
+
+    let (ipc, mut proc) = privsep::spawn_user_process_from_uid(uid.map_or_else(Uid::effective, Into::into), false)?;
+    let req = async {
+        let resp = ipc.destroy_creds(context::current()).await;
+        drop(ipc);
+        resp.context(privsep::IpcRequest)
+    };
+    let (resp, _) = tokio::join!(req, proc.wait());
+    resp??;
+
+    Ok(())
 }
 
 impl Sybil for SybilServer {
