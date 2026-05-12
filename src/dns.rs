@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use rand::Rng;
+use rand::RngExt;
 use snafu::prelude::*;
 use std::{
     cmp::Reverse,
