@@ -1,7 +1,7 @@
-CARGO_RPM_VERSION ?= 0.18.1
-CARGO_DEB_VERSION ?= 3.6.0
+CARGO_RPM_VERSION ?= 0.21.0
+CARGO_DEB_VERSION ?= 3.7.0
 
-export SLURM_VERSION ?= 24.11
+export SLURM_VERSION ?= 25.11
 export TARGET ?= $(shell rustc -vV | awk '/host/{print $$2}')
 
 .PHONY: target check debug release deb rpm clean

@@ -1,6 +1,6 @@
 [package]
 name = "sybil"
-version = "2.0.0"
+version = "2.0.1"
 authors = ["Jonathan Calmels <jcalmels@nvidia.com>"]
 edition = "2024"
 license = "Apache-2.0"
